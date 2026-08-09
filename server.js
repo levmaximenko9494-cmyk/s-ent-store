@@ -15,7 +15,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
-const SECRET = process.env.JWT_SECRET || "dev-only-change-me";
+const SECRET = process.env.JWT_SECRET;
+
+if (!SECRET) {
+  console.error("JWT_SECRET is required");
+  process.exit(1);
+}
 
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is required");
@@ -28,7 +33,23 @@ const pool = new Pool({
     ? false
     : { rejectUnauthorized: false }
 });
+const auth = (req, res, next) => {
+  try {
+    const header = req.headers.authorization || "";
 
+    if (!header.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Требуется авторизация" });
+    }
+
+    const token = header.slice(7);
+    const decoded = jwt.verify(token, SECRET);
+
+    req.admin = decoded;
+    next();
+  } catch (e) {
+    return res.status(401).json({ error: "Недействительный токен" });
+  }
+};
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "100kb" }));
 app.use(express.static(__dirname));
