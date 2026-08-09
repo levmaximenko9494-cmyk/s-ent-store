@@ -18,8 +18,30 @@ const api=(u,o={})=>fetch(u,{
   }
 });
 function show(x){document.querySelectorAll("section").forEach(s=>s.classList.add("hidden"));document.getElementById(x).classList.remove("hidden");x==="orders"?loadOrders():loadProducts()}
-async function login(){let r=await fetch("/api/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:email.value,password:pass.value})});let d=await r.json();if(!r.ok){err.textContent=d.error;return}token=d.token;localStorage.setItem("scent-admin-token",token);start()}
-  async function login(){
+async function login(){
+
+  let r = await fetch("/api/admin/login", {
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json"
+    },
+    body:JSON.stringify({
+      email: email.value,
+      password: pass.value
+    })
+  });
+
+  let data = await r.json();
+
+  console.log(data);
+
+  if(data.token){
+    localStorage.setItem("scent-admin-token", data.token);
+    start();
+  } else {
+    alert(data.error || "Ошибка входа");
+  }
+}
   let r = await fetch("/api/admin/login",{
     method:"POST",
     headers:{
