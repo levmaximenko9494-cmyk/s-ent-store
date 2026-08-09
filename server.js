@@ -287,7 +287,17 @@ app.patch("/api/admin/products/:id", auth, async (req, res) => {
     res.status(500).json({ error: "Ошибка базы данных" });
   }
 });
-
+app.get("/api/admin/orders", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM orders ORDER BY id DESC"
+    );
+    res.json(result.rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Ошибка загрузки заказов" });
+  }
+});
 app.get("/admin", (req, res) =>
   res.sendFile(path.join(__dirname, "admin.html"))
 );
