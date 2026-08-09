@@ -42,23 +42,7 @@ async function login(){
     alert(data.error || "Ошибка входа");
   }
 }
-  let r = await fetch("/api/admin/login",{
-    method:"POST",
-    headers:{
-      "Content-Type":"application/json"
-    },
-    body:JSON.stringify({
-      email:email.value,
-      password:pass.value
-    })
-  });
 
-  let data = await r.json();
-
-  if(data.token){
-  localStorage.setItem("scent-admin-token", data.token);
-  start();
-}
 function logout(){localStorage.removeItem("scent-admin-token");location.reload()}
 async function loadOrders(){let r=await api("/api/admin/orders");if(r.status===401)return logout();let a=await r.json();ordersList.innerHTML=a.length?a.map(o=>`<div class="order"><b>Заказ #${o.id}</b> · ${o.created_at}<br>${o.customer_name} · ${o.phone} · ${o.email}<br>${o.address}<br>${o.items.map(i=>`${i.name} × ${i.qty}`).join(", ")}<br><b>${o.total.toLocaleString("ru-RU")} ₽</b><br><select class="status" onchange="status(${o.id},this.value)">${["new","paid","processing","shipped","completed","cancelled"].map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}</select></div>`).join(""):"Заказов пока нет."}
 async function status(id,s){await api("/api/admin/orders/"+id,{method:"PATCH",body:JSON.stringify({status:s})})}
