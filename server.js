@@ -1,5 +1,5 @@
 import express from "express";
-import Database from "better-sqlite3";
+import pg from "pg";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import helmet from "helmet";
@@ -9,132 +9,293 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 dotenv.config();
-const __dirname=path.dirname(fileURLToPath(import.meta.url));
-const app=express();
-const db=new Database(path.join(__dirname,"scent-store.db"));
-const PORT=process.env.PORT||3000;
-const SECRET=process.env.JWT_SECRET||"dev-only-change-me";
 
-app.use(helmet({contentSecurityPolicy:false}));
-app.use(express.json({limit:"100kb"}));
+const { Pool } = pg;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const app = express();
+const PORT = process.env.PORT || 3000;
+const SECRET = process.env.JWT_SECRET || "dev-only-change-me";
+
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL is required");
+  process.exit(1);
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL.includes("localhost")
+    ? false
+    : { rejectUnauthorized: false }
+});
+
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(express.json({ limit: "100kb" }));
 app.use(express.static(__dirname));
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS products(
- id INTEGER PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL,
- notes TEXT NOT NULL, price INTEGER NOT NULL, stock INTEGER NOT NULL DEFAULT 0,
- active INTEGER NOT NULL DEFAULT 1
-);
-CREATE TABLE IF NOT EXISTS orders(
- id INTEGER PRIMARY KEY AUTOINCREMENT, customer_name TEXT NOT NULL,
- phone TEXT NOT NULL, email TEXT NOT NULL, address TEXT NOT NULL,
- total INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'new',
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS order_items(
- id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL,
- product_id INTEGER NOT NULL, name TEXT NOT NULL, price INTEGER NOT NULL, qty INTEGER NOT NULL,
- FOREIGN KEY(order_id) REFERENCES orders(id)
-);
-CREATE TABLE IF NOT EXISTS admins(
- id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL
-);`);
+async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS products(
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL,
+      notes TEXT NOT NULL,
+      price INTEGER NOT NULL,
+      stock INTEGER NOT NULL DEFAULT 0,
+      active BOOLEAN NOT NULL DEFAULT TRUE
+    );
 
-const count=db.prepare("SELECT COUNT(*) c FROM products").get().c;
-if(!count){
- const ins=db.prepare("INSERT INTO products(id,name,category,notes,price,stock) VALUES(?,?,?,?,?,?)");
- [
- [1,"Santal 01","woody","Сандал · Кедр · Амбра",8900,20],
- [2,"Rose No. 7","floral","Роза · Ирис · Мускус",7600,18],
- [3,"Thé Vert","fresh","Зелёный чай · Бергамот · Нероли",6900,25],
- [4,"Velours","floral","Пион · Ваниль · Белый мускус",8200,14],
- [5,"Bois Noir","woody","Ветивер · Пачули · Кожа",9400,12],
- [6,"Côte Blanche","fresh","Морская соль · Лимон · Кедр",7300,20],
- [7,"Ambre 24","unisex","Амбра · Тонка · Ладан",9700,10],
- [8,"Fleur Blanche","unisex","Жасмин · Груша · Сандал",7800,15]
- ].forEach(x=>ins.run(...x));
+    CREATE TABLE IF NOT EXISTS orders(
+      id SERIAL PRIMARY KEY,
+      customer_name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      email TEXT NOT NULL,
+      address TEXT NOT NULL,
+      total INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS order_items(
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      price INTEGER NOT NULL,
+      qty INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS admins(
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL
+    );
+  `);
+
+  const products = [
+    [1,"Santal 01","woody","Сандал · Кедр · Амбра",8900,20],
+    [2,"Rose No. 7","floral","Роза · Ирис · Мускус",7600,18],
+    [3,"Thé Vert","fresh","Зелёный чай · Бергамот · Нероли",6900,25],
+    [4,"Velours","floral","Пион · Ваниль · Белый мускус",8200,14],
+    [5,"Bois Noir","woody","Ветивер · Пачули · Кожа",9400,12],
+    [6,"Côte Blanche","fresh","Морская соль · Лимон · Кедр",7300,20],
+    [7,"Ambre 24","unisex","Амбра · Тонка · Ладан",9700,10],
+    [8,"Fleur Blanche","unisex","Жасмин · Груша · Сандал",7800,15]
+  ];
+
+  const count = (await pool.query("SELECT COUNT(*)::int AS c FROM products")).rows[0].c;
+  if (!count) {
+    for (const p of products) {
+      await pool.query(
+        `INSERT INTO products(id,name,category,notes,price,stock)
+         VALUES($1,$2,$3,$4,$5,$6)`,
+        p
+      );
+    }
+  }
+
+  const adminCount = (await pool.query("SELECT COUNT(*)::int AS c FROM admins")).rows[0].c;
+  if (!adminCount) {
+    const email = process.env.ADMIN_EMAIL || "admin@scent-store.ru";
+    const pass = process.env.ADMIN_PASSWORD || "change-this-password";
+    const hash = await bcrypt.hash(pass, 12);
+    await pool.query(
+      "INSERT INTO admins(email,password_hash) VALUES($1,$2)",
+      [email, hash]
+    );
+  }
 }
-if(!db.prepare("SELECT 1 FROM admins LIMIT 1").get()){
- const email=process.env.ADMIN_EMAIL||"admin@scent-store.ru";
- const pass=process.env.ADMIN_PASSWORD||"change-this-password";
- db.prepare("INSERT INTO admins(email,password_hash) VALUES(?,?)").run(email,bcrypt.hashSync(pass,12));
+
+const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
+app.use("/api/", apiLimiter);
+
+function auth(req, res, next) {
+  try {
+    const h = req.headers.authorization || "";
+    const token = h.startsWith("Bearer ") ? h.slice(7) : "";
+    req.admin = jwt.verify(token, SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: "Требуется авторизация" });
+  }
 }
 
-const apiLimiter=rateLimit({windowMs:15*60*1000,max:200});
-const loginLimiter=rateLimit({windowMs:15*60*1000,max:20});
-app.use("/api/",apiLimiter);
-
-function auth(req,res,next){
- try{
-  const h=req.headers.authorization||"";
-  const token=h.startsWith("Bearer ")?h.slice(7):"";
-  req.admin=jwt.verify(token,SECRET); next();
- }catch{res.status(401).json({error:"Требуется авторизация"})}
-}
-
-app.get("/api/products",(req,res)=>{
- res.json(db.prepare("SELECT id,name,category,notes,price,stock,active FROM products WHERE active=1 ORDER BY id").all());
+app.get("/api/products", async (req, res) => {
+  try {
+    const r = await pool.query(
+      "SELECT id,name,category,notes,price,stock,active FROM products WHERE active=TRUE ORDER BY id"
+    );
+    res.json(r.rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Ошибка базы данных" });
+  }
 });
 
-app.post("/api/orders",(req,res)=>{
- const {name,phone,email,address,items}=req.body||{};
- if(!name||!phone||!email||!address||!Array.isArray(items)||!items.length)
-  return res.status(400).json({error:"Заполните все поля заказа"});
- const get=db.prepare("SELECT id,name,price,stock FROM products WHERE id=? AND active=1");
- const checked=[]; let total=0;
- for(const item of items){
-  const p=get.get(Number(item.productId));
-  const qty=Math.max(1,Math.min(99,Number(item.qty)||1));
-  if(!p) return res.status(400).json({error:"Товар не найден"});
-  if(p.stock<qty) return res.status(400).json({error:`Недостаточно товара: ${p.name}`});
-  checked.push({...p,qty}); total+=p.price*qty;
- }
- const tx=db.transaction(()=>{
-  const order=db.prepare("INSERT INTO orders(customer_name,phone,email,address,total) VALUES(?,?,?,?,?)").run(name,phone,email,address,total);
-  const oi=db.prepare("INSERT INTO order_items(order_id,product_id,name,price,qty) VALUES(?,?,?,?,?)");
-  const dec=db.prepare("UPDATE products SET stock=stock-? WHERE id=?");
-  checked.forEach(p=>{oi.run(order.lastInsertRowid,p.id,p.name,p.price,p.qty);dec.run(p.qty,p.id)});
-  return Number(order.lastInsertRowid);
- });
- const id=tx();
- res.status(201).json({orderId:id,total,status:"new"});
+app.post("/api/orders", async (req, res) => {
+  const { name, phone, email, address, items } = req.body || {};
+  if (!name || !phone || !email || !address || !Array.isArray(items) || !items.length)
+    return res.status(400).json({ error: "Заполните все поля заказа" });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const checked = [];
+    let total = 0;
+
+    for (const item of items) {
+      const qty = Math.max(1, Math.min(99, Number(item.qty) || 1));
+      const r = await client.query(
+        "SELECT id,name,price,stock FROM products WHERE id=$1 AND active=TRUE FOR UPDATE",
+        [Number(item.productId)]
+      );
+      const p = r.rows[0];
+      if (!p) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Товар не найден" });
+      }
+      if (p.stock < qty) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: `Недостаточно товара: ${p.name}` });
+      }
+      checked.push({ ...p, qty });
+      total += p.price * qty;
+    }
+
+    const order = await client.query(
+      `INSERT INTO orders(customer_name,phone,email,address,total)
+       VALUES($1,$2,$3,$4,$5) RETURNING id`,
+      [name, phone, email, address, total]
+    );
+    const orderId = order.rows[0].id;
+
+    for (const p of checked) {
+      await client.query(
+        `INSERT INTO order_items(order_id,product_id,name,price,qty)
+         VALUES($1,$2,$3,$4,$5)`,
+        [orderId, p.id, p.name, p.price, p.qty]
+      );
+      await client.query(
+        "UPDATE products SET stock=stock-$1 WHERE id=$2",
+        [p.qty, p.id]
+      );
+    }
+
+    await client.query("COMMIT");
+    res.status(201).json({ orderId, total, status: "new" });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    console.error(e);
+    res.status(500).json({ error: "Не удалось создать заказ" });
+  } finally {
+    client.release();
+  }
 });
 
-app.post("/api/admin/login",loginLimiter,(req,res)=>{
- const {email,password}=req.body||{};
- const a=db.prepare("SELECT * FROM admins WHERE email=?").get(email);
- if(!a||!bcrypt.compareSync(password||"",a.password_hash)) return res.status(401).json({error:"Неверный email или пароль"});
- res.json({token:jwt.sign({id:a.id,email:a.email},SECRET,{expiresIn:"8h"})});
+app.post("/api/admin/login", loginLimiter, async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    const r = await pool.query("SELECT * FROM admins WHERE email=$1", [email]);
+    const a = r.rows[0];
+    if (!a || !(await bcrypt.compare(password || "", a.password_hash)))
+      return res.status(401).json({ error: "Неверный email или пароль" });
+
+    res.json({ token: jwt.sign({ id: a.id, email: a.email }, SECRET, { expiresIn: "8h" }) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Ошибка входа" });
+  }
 });
 
-app.get("/api/admin/orders",auth,(req,res)=>{
- const orders=db.prepare("SELECT * FROM orders ORDER BY id DESC").all();
- const items=db.prepare("SELECT * FROM order_items WHERE order_id=?");
- res.json(orders.map(o=>({...o,items:items.all(o.id)})));
+app.get("/api/admin/orders", auth, async (req, res) => {
+  try {
+    const orders = (await pool.query("SELECT * FROM orders ORDER BY id DESC")).rows;
+    const items = (await pool.query("SELECT * FROM order_items ORDER BY id")).rows;
+    const byOrder = new Map();
+    for (const item of items) {
+      if (!byOrder.has(item.order_id)) byOrder.set(item.order_id, []);
+      byOrder.get(item.order_id).push(item);
+    }
+    res.json(orders.map(o => ({ ...o, items: byOrder.get(o.id) || [] })));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Ошибка базы данных" });
+  }
 });
 
-app.patch("/api/admin/orders/:id",auth,(req,res)=>{
- const allowed=["new","paid","processing","shipped","completed","cancelled"];
- if(!allowed.includes(req.body.status)) return res.status(400).json({error:"Недопустимый статус"});
- db.prepare("UPDATE orders SET status=? WHERE id=?").run(req.body.status,req.params.id);
- res.json({ok:true});
+app.patch("/api/admin/orders/:id", auth, async (req, res) => {
+  const allowed = ["new", "paid", "processing", "shipped", "completed", "cancelled"];
+  if (!allowed.includes(req.body.status))
+    return res.status(400).json({ error: "Недопустимый статус" });
+  try {
+    await pool.query("UPDATE orders SET status=$1 WHERE id=$2", [
+      req.body.status, Number(req.params.id)
+    ]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Ошибка базы данных" });
+  }
 });
 
-app.get("/api/admin/products",auth,(req,res)=>{
- res.json(db.prepare("SELECT * FROM products ORDER BY id").all());
-});
-app.post("/api/admin/products",auth,(req,res)=>{
- const {name,category,notes,price,stock}=req.body||{};
- if(!name||!category||!notes||!Number(price)) return res.status(400).json({error:"Нужны name/category/notes/price"});
- const r=db.prepare("INSERT INTO products(name,category,notes,price,stock) VALUES(?,?,?,?,?)").run(name,category,notes,Number(price),Number(stock)||0);
- res.status(201).json({id:r.lastInsertRowid});
-});
-app.patch("/api/admin/products/:id",auth,(req,res)=>{
- const p=req.body||{};
- db.prepare("UPDATE products SET name=COALESCE(?,name),category=COALESCE(?,category),notes=COALESCE(?,notes),price=COALESCE(?,price),stock=COALESCE(?,stock),active=COALESCE(?,active) WHERE id=?")
- .run(p.name??null,p.category??null,p.notes??null,p.price??null,p.stock??null,p.active??null,req.params.id);
- res.json({ok:true});
+app.get("/api/admin/products", auth, async (req, res) => {
+  try {
+    res.json((await pool.query("SELECT * FROM products ORDER BY id")).rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Ошибка базы данных" });
+  }
 });
 
-app.get("/admin",(req,res)=>res.sendFile(path.join(__dirname,"admin.html")));
-app.listen(PORT,()=>console.log(`Scent Store: http://localhost:${PORT}`));
+app.post("/api/admin/products", auth, async (req, res) => {
+  const { name, category, notes, price, stock } = req.body || {};
+  if (!name || !category || !notes || !Number(price))
+    return res.status(400).json({ error: "Нужны name/category/notes/price" });
+  try {
+    const r = await pool.query(
+      `INSERT INTO products(name,category,notes,price,stock)
+       VALUES($1,$2,$3,$4,$5) RETURNING id`,
+      [name, category, notes, Number(price), Number(stock) || 0]
+    );
+    res.status(201).json({ id: r.rows[0].id });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Не удалось добавить товар" });
+  }
+});
+
+app.patch("/api/admin/products/:id", auth, async (req, res) => {
+  const p = req.body || {};
+  try {
+    await pool.query(
+      `UPDATE products SET
+       name=COALESCE($1,name), category=COALESCE($2,category),
+       notes=COALESCE($3,notes), price=COALESCE($4,price),
+       stock=COALESCE($5,stock), active=COALESCE($6,active)
+       WHERE id=$7`,
+      [
+        p.name ?? null, p.category ?? null, p.notes ?? null,
+        p.price ?? null, p.stock ?? null, p.active ?? null,
+        Number(req.params.id)
+      ]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Ошибка базы данных" });
+  }
+});
+
+app.get("/admin", (req, res) =>
+  res.sendFile(path.join(__dirname, "admin.html"))
+);
+
+initDb()
+  .then(() => {
+    app.listen(PORT, () => console.log(`Scent Store listening on ${PORT}`));
+  })
+  .catch(err => {
+    console.error("Database initialization failed:", err);
+    process.exit(1);
+  });
