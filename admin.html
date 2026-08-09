@@ -1,0 +1,20 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Scent Store — Admin</title><style>
+body{margin:0;background:#f5f1eb;color:#211d1a;font:14px Arial}main{max-width:1100px;margin:auto;padding:30px 20px}.brand{font:28px Georgia}.box{background:#fffdfa;border:1px solid #ddd5cc;padding:22px;margin:20px 0}input,select{padding:10px;border:1px solid #ccc;margin:4px}.btn{padding:10px 15px;background:#171310;color:#fff;border:0}.tabs button{padding:10px;margin-right:6px}.hidden{display:none}.order{border-top:1px solid #ddd;padding:15px 0}.status{padding:8px}.danger{background:#b4473c;color:white}</style></head><body><main>
+<div class="brand">SCENT STORE · ADMIN</div>
+<div id="login" class="box"><h2>Вход</h2><input id="email" placeholder="Email"><input id="pass" type="password" placeholder="Пароль"><button class="btn" onclick="login()">Войти</button><p id="err"></p></div>
+<div id="panel" class="hidden"><div class="tabs"><button onclick="show('orders')">Заказы</button><button onclick="show('products')">Товары</button><button onclick="logout()">Выйти</button></div>
+<section id="orders" class="box"><h2>Заказы</h2><div id="ordersList"></div></section>
+<section id="products" class="box hidden"><h2>Товары</h2><div id="productsList"></div><h3>Добавить товар</h3><input id="pn" placeholder="Название"><input id="pc" placeholder="Категория"><input id="pt" placeholder="Ноты"><input id="pp" type="number" placeholder="Цена"><input id="ps" type="number" placeholder="Остаток"><button class="btn" onclick="addProduct()">Добавить</button></section>
+</div></main><script>
+let token=localStorage.getItem("scent-admin-token");
+const api=(u,o={})=>fetch(u,{...o,headers:{"Content-Type":"application/json",...(o.headers||{}),"Authorization":"Bearer "+token}});
+function show(x){document.querySelectorAll("section").forEach(s=>s.classList.add("hidden"));document.getElementById(x).classList.remove("hidden");x==="orders"?loadOrders():loadProducts()}
+async function login(){let r=await fetch("/api/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:email.value,password:pass.value})});let d=await r.json();if(!r.ok){err.textContent=d.error;return}token=d.token;localStorage.setItem("scent-admin-token",token);start()}
+function logout(){localStorage.removeItem("scent-admin-token");location.reload()}
+async function loadOrders(){let r=await api("/api/admin/orders");if(r.status===401)return logout();let a=await r.json();ordersList.innerHTML=a.length?a.map(o=>`<div class="order"><b>Заказ #${o.id}</b> · ${o.created_at}<br>${o.customer_name} · ${o.phone} · ${o.email}<br>${o.address}<br>${o.items.map(i=>`${i.name} × ${i.qty}`).join(", ")}<br><b>${o.total.toLocaleString("ru-RU")} ₽</b><br><select class="status" onchange="status(${o.id},this.value)">${["new","paid","processing","shipped","completed","cancelled"].map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}</select></div>`).join(""):"Заказов пока нет."}
+async function status(id,s){await api("/api/admin/orders/"+id,{method:"PATCH",body:JSON.stringify({status:s})})}
+async function loadProducts(){let r=await api("/api/admin/products");let a=await r.json();productsList.innerHTML=a.map(p=>`<div class="order"><b>${p.name}</b> · ${p.price.toLocaleString("ru-RU")} ₽ · остаток ${p.stock}<br>${p.notes}</div>`).join("")}
+async function addProduct(){let body={name:pn.value,category:pc.value,notes:pt.value,price:+pp.value,stock:+ps.value};let r=await api("/api/admin/products",{method:"POST",body:JSON.stringify(body)});if(r.ok){pn.value=pc.value=pt.value=pp.value=ps.value="";loadProducts()}}
+function start(){loginBoxHide();show("orders")}function loginBoxHide(){document.getElementById("login").classList.add("hidden");document.getElementById("panel").classList.remove("hidden")}
+if(token){start()}
+</script></body></html>
