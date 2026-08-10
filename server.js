@@ -131,16 +131,7 @@ const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
 app.use("/api/", apiLimiter);
 
-function auth(req, res, next) {
-  try {
-    const h = req.headers.authorization || "";
-    const token = h.startsWith("Bearer ") ? h.slice(7) : "";
-    req.admin = jwt.verify(token, SECRET);
-    next();
-  } catch {
-    res.status(401).json({ error: "Требуется авторизация" });
-  }
-}
+
 
 app.get("/api/products", async (req, res) => {
   try {
