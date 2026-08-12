@@ -65,32 +65,23 @@ async function initDb() {
       stock INTEGER NOT NULL DEFAULT 0,
       active BOOLEAN NOT NULL DEFAULT TRUE
     );
+  `);
 
-    CREATE TABLE IF NOT EXISTS orders(
-      id SERIAL PRIMARY KEY,
-      customer_name TEXT NOT NULL,
-      phone TEXT NOT NULL,
-      email TEXT NOT NULL,
-      address TEXT NOT NULL,
-      total INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'new',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+  await pool.query(`
+    CREATE SEQUENCE IF NOT EXISTS products_id_seq;
+  `);
 
-    CREATE TABLE IF NOT EXISTS order_items(
-      id SERIAL PRIMARY KEY,
-      order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-      product_id INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      price INTEGER NOT NULL,
-      qty INTEGER NOT NULL
+  await pool.query(`
+    SELECT setval(
+      'products_id_seq',
+      COALESCE((SELECT MAX(id) FROM products), 0) + 1,
+      false
     );
+  `);
 
-    CREATE TABLE IF NOT EXISTS admins(
-      id SERIAL PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL
-    );
+  await pool.query(`
+    ALTER TABLE products
+    ALTER COLUMN id SET DEFAULT nextval('products_id_seq');
   `);
 
   const products = [
