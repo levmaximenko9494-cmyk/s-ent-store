@@ -10,7 +10,7 @@ function getToken(){
   return localStorage.getItem("scent-admin-token");
 }
 
-const api=(u,o={})=>fetch(u,{
+const api=(u,o={})=>fetch(u,{...o,
   headers:{
     "Content-Type":"application/json",
     ...(o.headers||{}),
