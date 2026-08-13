@@ -290,8 +290,6 @@ app.patch("/api/admin/products/:id", auth, async (req, res) => {
     res.status(500).json({ error: "Ошибка базы данных" });
   }
 });
-
-});
 app.get("/admin", (req, res) =>
   res.sendFile(path.join(__dirname, "admin.html"))
 );
