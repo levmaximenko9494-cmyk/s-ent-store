@@ -17,7 +17,37 @@ async function loadServerProducts(){
  }catch(e){}
 }
 const money=n=>n.toLocaleString("ru-RU")+" ₽";
-function renderProducts(list=products){document.querySelector("#products").innerHTML=list.length?list.map(p=>`<article class="product"><div class="visual ${p.tone}"><div class="mini"></div></div><div class="details"><small>${p.notes}</small><h3>${p.name}</h3><div class="row"><strong>${money(p.price)}</strong><button class="add" onclick="addToCart(${p.id})">В корзину</button></div></div></article>`).join(""):`<div class="empty">В этой категории пока нет товаров.</div>`}
+function renderProducts(list=products){
+  document.querySelector("#products").innerHTML = list.length
+    ? list.map(p => `
+      <article class="product">
+        <div class="visual ${p.tone}"></div>
+        <div class="product-info">
+          <div class="notes">${p.notes}</div>
+          <h3>${p.name}</h3>
+          <div class="price">${money(p.price)}</div>
+
+          <div class="stock">
+            ${
+              p.stock <= 0
+                ? "Нет в наличии"
+                : p.stock <= 3
+                  ? `Осталось ${p.stock} шт.`
+                  : `В наличии: ${p.stock} шт.`
+            }
+          </div>
+
+          <button
+            onclick="addToCart(${p.id})"
+            ${p.stock <= 0 ? "disabled" : ""}
+          >
+            ${p.stock <= 0 ? "Нет в наличии" : "В корзину"}
+          </button>
+        </div>
+      </article>
+    `).join("")
+    : "<p>Товары не найдены</p>";
+}
 function addToCart(id){cart.push(id);save();openCart()}
 function save(){localStorage.setItem("scent-cart",JSON.stringify(cart));renderCart()}
 function renderCart(){const box=document.querySelector("#cartItems");document.querySelector("#cartCount").textContent=cart.length;if(!cart.length){box.innerHTML='<p style="color:#766f68">Корзина пуста. Добавьте понравившийся аромат.</p>'}else{box.innerHTML=cart.map((id,i)=>{const p=products.find(x=>x.id===id);return `<div class="cart-item"><div class="cart-thumb ${p.tone}"></div><div><h4>${p.name}</h4><div>${money(p.price)}</div><button class="remove" onclick="removeItem(${i})">Удалить</button></div></div>`}).join("")}document.querySelector("#cartTotal").textContent=money(cart.reduce((s,id)=>s+products.find(p=>p.id===id).price,0))}
