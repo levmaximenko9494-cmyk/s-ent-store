@@ -40,8 +40,13 @@ function renderProducts(list = products) {
             }
           </div>
 
+          <div class="wholesale-info">
+            <span>Оптовые условия</span>
+            <small>Минимальная партия и цены от количества — по запросу</small>
+          </div>
+
           <div class="row">
-            <b>${money(p.price)}</b>
+            <div class="price"><small>Цена за единицу</small><b>${money(p.price)}</b></div>
 
             <button
               class="add"
@@ -60,12 +65,12 @@ function renderProducts(list = products) {
        
 function addToCart(id){cart.push(id);save();openCart()}
 function save(){localStorage.setItem("scent-cart",JSON.stringify(cart));renderCart()}
-function renderCart(){const box=document.querySelector("#cartItems");document.querySelector("#cartCount").textContent=cart.length;if(!cart.length){box.innerHTML='<p style="color:#766f68">Корзина пуста. Добавьте понравившийся аромат.</p>'}else{box.innerHTML=cart.map((id,i)=>{const p=products.find(x=>x.id===id);return `<div class="cart-item"><div class="cart-thumb ${p.tone}"></div><div><h4>${p.name}</h4><div>${money(p.price)}</div><button class="remove" onclick="removeItem(${i})">Удалить</button></div></div>`}).join("")}document.querySelector("#cartTotal").textContent=money(cart.reduce((s,id)=>s+products.find(p=>p.id===id).price,0))}
+function renderCart(){const box=document.querySelector("#cartItems");document.querySelector("#cartCount").textContent=cart.length;if(!cart.length){box.innerHTML='<p style="color:#766f68">Оптовая корзина пуста. Добавьте товары из каталога.</p>'}else{box.innerHTML=cart.map((id,i)=>{const p=products.find(x=>x.id===id);return `<div class="cart-item"><div class="cart-thumb ${p.tone}"></div><div><h4>${p.name}</h4><div>${money(p.price)} за единицу</div><button class="remove" onclick="removeItem(${i})">Удалить</button></div></div>`}).join("")}document.querySelector("#cartTotal").textContent=money(cart.reduce((s,id)=>s+products.find(p=>p.id===id).price,0))}
 function removeItem(i){cart.splice(i,1);save()}
 function openCart(){document.querySelector("#drawer").classList.add("open");renderCart()}
  document.querySelectorAll(".filters button").forEach(b=>b.onclick=()=>{document.querySelectorAll(".filters button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const c=b.dataset.cat;renderProducts(c==="all"?products:products.filter(p=>p.category===c))});
 document.querySelector("#cartOpen").onclick=openCart;document.querySelector("#cartClose").onclick=()=>document.querySelector("#drawer").classList.remove("open");
-document.querySelector("#checkout").onclick=()=>{if(!cart.length)return alert("Сначала добавьте товар в корзину.");document.querySelector("#drawer").classList.remove("open");document.querySelector("#modal").classList.add("open")};
+document.querySelector("#checkout").onclick=()=>{if(!cart.length)return alert("Сначала добавьте товары в оптовую корзину.");document.querySelector("#drawer").classList.remove("open");document.querySelector("#modal").classList.add("open")};
 document.querySelector("#modalClose").onclick=()=>document.querySelector("#modal").classList.remove("open");
 document.querySelector("#orderForm").onsubmit=async e=>{
  e.preventDefault();
@@ -80,7 +85,7 @@ document.querySelector("#orderForm").onsubmit=async e=>{
   let d={};
   try{d=await r.json()}catch(e){}
   if(!r.ok){alert(d.error||"Не удалось оформить заказ");return}
-  alert("Заказ #"+d.orderId+" принят!");
+  alert("Оптовый заказ #"+d.orderId+" принят!");
   cart=[];save();e.target.reset();document.querySelector("#modal").classList.remove("open")
  }catch(e){
   alert("Не удалось связаться с сервером. Проверьте подключение и попробуйте снова.")
