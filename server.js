@@ -56,6 +56,14 @@ app.use(express.static(__dirname));
 
 async function initDb() {
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS admins(
+      id SERIAL PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL
+    );
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS products(
       id INTEGER PRIMARY KEY,
       name TEXT NOT NULL,
@@ -82,6 +90,31 @@ async function initDb() {
   await pool.query(`
     ALTER TABLE products
     ALTER COLUMN id SET DEFAULT nextval('products_id_seq');
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS orders(
+      id SERIAL PRIMARY KEY,
+      customer_name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      email TEXT,
+      address TEXT NOT NULL,
+      total INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new'
+        CHECK (status IN ('new', 'paid', 'processing', 'shipped', 'completed', 'cancelled')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS order_items(
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      product_id INTEGER REFERENCES products(id),
+      name TEXT NOT NULL,
+      price INTEGER NOT NULL,
+      qty INTEGER NOT NULL
+    );
   `);
 
   const products = [
@@ -141,6 +174,16 @@ app.post("/api/orders", async (req, res) => {
   if (!name || !phone || !email || !address || !Array.isArray(items) || !items.length)
     return res.status(400).json({ error: "Заполните все поля заказа" });
 
+  const quantities = new Map();
+  for (const item of items) {
+    const productId = Number(item?.productId);
+    const qty = Number(item?.qty);
+    if (!Number.isInteger(productId) || productId <= 0 || !Number.isInteger(qty) || qty <= 0) {
+      return res.status(400).json({ error: "Некорректные товар или количество" });
+    }
+    quantities.set(productId, (quantities.get(productId) || 0) + qty);
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -148,11 +191,10 @@ app.post("/api/orders", async (req, res) => {
     const checked = [];
     let total = 0;
 
-    for (const item of items) {
-      const qty = Math.max(1, Math.min(99, Number(item.qty) || 1));
+    for (const [productId, qty] of quantities) {
       const r = await client.query(
         "SELECT id,name,price,stock FROM products WHERE id=$1 AND active=TRUE FOR UPDATE",
-        [Number(item.productId)]
+        [productId]
       );
       const p = r.rows[0];
       if (!p) {
@@ -163,6 +205,16 @@ app.post("/api/orders", async (req, res) => {
         await client.query("ROLLBACK");
         return res.status(400).json({ error: `Недостаточно товара: ${p.name}` });
       }
+
+      const updated = await client.query(
+        "UPDATE products SET stock=stock-$1 WHERE id=$2 AND stock >= $1 RETURNING id",
+        [qty, p.id]
+      );
+      if (!updated.rowCount) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: `Недостаточно товара: ${p.name}` });
+      }
+
       checked.push({ ...p, qty });
       total += p.price * qty;
     }
@@ -179,10 +231,6 @@ app.post("/api/orders", async (req, res) => {
         `INSERT INTO order_items(order_id,product_id,name,price,qty)
          VALUES($1,$2,$3,$4,$5)`,
         [orderId, p.id, p.name, p.price, p.qty]
-      );
-      await client.query(
-        "UPDATE products SET stock=stock-$1 WHERE id=$2",
-        [p.qty, p.id]
       );
     }
 

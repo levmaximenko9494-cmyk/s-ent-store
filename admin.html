@@ -43,8 +43,38 @@ async function login(){
 }
 
 function logout(){localStorage.removeItem("scent-admin-token");location.reload()}
-async function loadOrders(){let r=await api("/api/admin/orders");if(r.status===401)return logout();let a=await r.json();ordersList.innerHTML=a.length?a.map(o=>`<div class="order"><b>Заказ #${o.id}</b> · ${o.created_at}<br>${o.customer_name} · ${o.phone} · ${o.email}<br>${o.address}<br>${o.items.map(i=>`${i.name} × ${i.qty}`).join(", ")}<br><b>${o.total.toLocaleString("ru-RU")} ₽</b><br><select class="status" onchange="status(${o.id},this.value)">${["new","paid","processing","shipped","completed","cancelled"].map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}</select></div>`).join(""):"Заказов пока нет."}
-async function status(id,s){await api("/api/admin/orders/"+id,{method:"PATCH",body:JSON.stringify({status:s})})}
+async function loadOrders(){
+  try{
+    let r=await api("/api/admin/orders");
+    if(r.status===401)return logout();
+    let a;
+    try{a=await r.json()}catch(e){a=null}
+    if(!r.ok){
+      ordersList.textContent=(a&&a.error)||"Не удалось загрузить заказы. Попробуйте позже.";
+      return;
+    }
+    ordersList.innerHTML=a.length?a.map(o=>`<div class="order"><b>Заказ #${o.id}</b> · ${o.created_at}<br>${o.customer_name} · ${o.phone} · ${o.email}<br>${o.address}<br>${o.items.map(i=>`${i.name} × ${i.qty}`).join(", ")}<br><b>${o.total.toLocaleString("ru-RU")} ₽</b><br><select class="status" data-current="${o.status}" onchange="status(${o.id},this)">${["new","paid","processing","shipped","completed","cancelled"].map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}</select></div>`).join(""):"Заказов пока нет.";
+  }catch(e){
+    ordersList.textContent="Не удалось связаться с сервером. Проверьте подключение.";
+  }
+}
+async function status(id,select){
+  const previous=select.dataset.current;
+  select.disabled=true;
+  try{
+    const r=await api("/api/admin/orders/"+id,{method:"PATCH",body:JSON.stringify({status:select.value})});
+    if(r.status===401)return logout();
+    let data={};
+    try{data=await r.json()}catch(e){}
+    if(!r.ok)throw new Error(data.error||"Не удалось изменить статус заказа");
+    select.dataset.current=select.value;
+  }catch(e){
+    select.value=previous;
+    alert(e.message||"Не удалось изменить статус заказа");
+  }finally{
+    select.disabled=false;
+  }
+}
 async function loadProducts(){let r=await api("/api/admin/products");let a=await r.json();productsList.innerHTML=a.map(p=>`<div class="order"><b>${p.name}</b> · ${p.price.toLocaleString("ru-RU")} ₽ · остаток ${p.stock}<br>${p.notes}</div>`).join("")}
 async function addProduct(){let body={name:pn.value,category:pc.value,notes:pt.value,price:+pp.value,stock:+ps.value};let r=await api("/api/admin/products",{method:"POST",body:JSON.stringify(body)});if(r.ok){pn.value=pc.value=pt.value=pp.value=ps.value="";loadProducts()}}
 function start(){loginBoxHide();show("orders")}function loginBoxHide(){document.getElementById("login").classList.add("hidden");document.getElementById("panel").classList.remove("hidden")}

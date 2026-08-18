@@ -1,12 +1,12 @@
 const products=[
-{id:1,name:"Santal 01",cat:"woody",notes:"Сандал · Кедр · Амбра",price:8900,tone:"tone1"},
-{id:2,name:"Rose No. 7",cat:"floral",notes:"Роза · Ирис · Мускус",price:7600,tone:"tone2"},
-{id:3,name:"Thé Vert",cat:"fresh",notes:"Зелёный чай · Бергамот · Нероли",price:6900,tone:"tone3"},
-{id:4,name:"Velours",cat:"floral",notes:"Пион · Ваниль · Белый мускус",price:8200,tone:"tone4"},
-{id:5,name:"Bois Noir",cat:"woody",notes:"Ветивер · Пачули · Кожа",price:9400,tone:"tone5"},
-{id:6,name:"Côte Blanche",cat:"fresh",notes:"Морская соль · Лимон · Кедр",price:7300,tone:"tone3"},
-{id:7,name:"Ambre 24",cat:"unisex",notes:"Амбра · Тонка · Ладан",price:9700,tone:"tone1"},
-{id:8,name:"Fleur Blanche",cat:"unisex",notes:"Жасмин · Груша · Сандал",price:7800,tone:"tone4"}];
+{id:1,name:"Santal 01",category:"woody",notes:"Сандал · Кедр · Амбра",price:8900,tone:"tone1"},
+{id:2,name:"Rose No. 7",category:"floral",notes:"Роза · Ирис · Мускус",price:7600,tone:"tone2"},
+{id:3,name:"Thé Vert",category:"fresh",notes:"Зелёный чай · Бергамот · Нероли",price:6900,tone:"tone3"},
+{id:4,name:"Velours",category:"floral",notes:"Пион · Ваниль · Белый мускус",price:8200,tone:"tone4"},
+{id:5,name:"Bois Noir",category:"woody",notes:"Ветивер · Пачули · Кожа",price:9400,tone:"tone5"},
+{id:6,name:"Côte Blanche",category:"fresh",notes:"Морская соль · Лимон · Кедр",price:7300,tone:"tone3"},
+{id:7,name:"Ambre 24",category:"unisex",notes:"Амбра · Тонка · Ладан",price:9700,tone:"tone1"},
+{id:8,name:"Fleur Blanche",category:"unisex",notes:"Жасмин · Груша · Сандал",price:7800,tone:"tone4"}];
 let cart=JSON.parse(localStorage.getItem("scent-cart")||"[]");
 async function loadServerProducts(){
  try{
@@ -63,20 +63,30 @@ function save(){localStorage.setItem("scent-cart",JSON.stringify(cart));renderCa
 function renderCart(){const box=document.querySelector("#cartItems");document.querySelector("#cartCount").textContent=cart.length;if(!cart.length){box.innerHTML='<p style="color:#766f68">Корзина пуста. Добавьте понравившийся аромат.</p>'}else{box.innerHTML=cart.map((id,i)=>{const p=products.find(x=>x.id===id);return `<div class="cart-item"><div class="cart-thumb ${p.tone}"></div><div><h4>${p.name}</h4><div>${money(p.price)}</div><button class="remove" onclick="removeItem(${i})">Удалить</button></div></div>`}).join("")}document.querySelector("#cartTotal").textContent=money(cart.reduce((s,id)=>s+products.find(p=>p.id===id).price,0))}
 function removeItem(i){cart.splice(i,1);save()}
 function openCart(){document.querySelector("#drawer").classList.add("open");renderCart()}
-document.querySelectorAll(".filters button").forEach(b=>b.onclick=()=>{document.querySelectorAll(".filters button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const c=b.dataset.cat;renderProducts(c==="all"?products:products.filter(p=>p.cat===c))});
+ document.querySelectorAll(".filters button").forEach(b=>b.onclick=()=>{document.querySelectorAll(".filters button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const c=b.dataset.cat;renderProducts(c==="all"?products:products.filter(p=>p.category===c))});
 document.querySelector("#cartOpen").onclick=openCart;document.querySelector("#cartClose").onclick=()=>document.querySelector("#drawer").classList.remove("open");
 document.querySelector("#checkout").onclick=()=>{if(!cart.length)return alert("Сначала добавьте товар в корзину.");document.querySelector("#drawer").classList.remove("open");document.querySelector("#modal").classList.add("open")};
 document.querySelector("#modalClose").onclick=()=>document.querySelector("#modal").classList.remove("open");
 document.querySelector("#orderForm").onsubmit=async e=>{
  e.preventDefault();
- const f=new FormData(e.target);
- const items=cart.map(id=>({productId:id,qty:1}));
- const r=await fetch("/api/orders",{method:"POST",headers:{"Content-Type":"application/json"},
- body:JSON.stringify({name:f.get("name"),phone:f.get("phone"),email:f.get("email"),address:f.get("address"),items})});
- const d=await r.json();
- if(!r.ok){alert(d.error||"Не удалось оформить заказ");return}
- alert("Заказ #"+d.orderId+" принят!");
- cart=[];save();e.target.reset();document.querySelector("#modal").classList.remove("open")
+ const button=e.submitter||e.target.querySelector('button[type="submit"], button:not([type])');
+ if(button.disabled)return;
+ button.disabled=true;
+ try{
+  const f=new FormData(e.target);
+  const items=cart.map(id=>({productId:id,qty:1}));
+  const r=await fetch("/api/orders",{method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({name:f.get("name"),phone:f.get("phone"),email:f.get("email"),address:f.get("address"),items})});
+  let d={};
+  try{d=await r.json()}catch(e){}
+  if(!r.ok){alert(d.error||"Не удалось оформить заказ");return}
+  alert("Заказ #"+d.orderId+" принят!");
+  cart=[];save();e.target.reset();document.querySelector("#modal").classList.remove("open")
+ }catch(e){
+  alert("Не удалось связаться с сервером. Проверьте подключение и попробуйте снова.")
+ }finally{
+  button.disabled=false;
+ }
 };
 document.querySelector("#searchOpen").onclick=()=>{const q=prompt("Что ищем? Например: Rose");if(q===null)return;renderProducts(products.filter(p=>(p.name+" "+p.notes).toLowerCase().includes(q.toLowerCase())))};
 renderProducts();renderCart();loadServerProducts();
