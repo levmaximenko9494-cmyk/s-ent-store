@@ -107,6 +107,43 @@ async function initDb() {
   `);
 
   await pool.query(`
+    ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS brand TEXT,
+      ADD COLUMN IF NOT EXISTS volume TEXT,
+      ADD COLUMN IF NOT EXISTS sku TEXT,
+      ADD COLUMN IF NOT EXISTS wholesale_price INTEGER,
+      ADD COLUMN IF NOT EXISTS min_qty INTEGER;
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS products_sku_unique
+    ON products(sku) WHERE sku IS NOT NULL;
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'products_wholesale_price_nonnegative'
+          AND conrelid = 'products'::regclass
+      ) THEN
+        ALTER TABLE products ADD CONSTRAINT products_wholesale_price_nonnegative
+          CHECK (wholesale_price IS NULL OR wholesale_price >= 0);
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'products_min_qty_positive'
+          AND conrelid = 'products'::regclass
+      ) THEN
+        ALTER TABLE products ADD CONSTRAINT products_min_qty_positive
+          CHECK (min_qty IS NULL OR min_qty > 0);
+      END IF;
+    END
+    $$;
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS order_items(
       id SERIAL PRIMARY KEY,
       order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -168,12 +205,52 @@ const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
 app.use("/api/", apiLimiter);
 
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+function validateProductExtensions(product, partial = false) {
+  const values = {};
+  for (const field of ["brand", "volume", "sku"]) {
+    if (partial && !hasOwn(product, field)) continue;
+    const raw = product[field];
+    if (raw != null && typeof raw !== "string") {
+      return { error: `${field} должен быть строкой` };
+    }
+    values[field] = typeof raw === "string" ? raw.trim() || null : null;
+  }
+
+  if (!partial || hasOwn(product, "wholesale_price")) {
+    const raw = product.wholesale_price;
+    if (raw == null || raw === "") values.wholesale_price = null;
+    else {
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value < 0) {
+        return { error: "Оптовая цена должна быть целым неотрицательным числом" };
+      }
+      values.wholesale_price = value;
+    }
+  }
+
+  if (!partial || hasOwn(product, "min_qty")) {
+    const raw = product.min_qty;
+    if (raw == null || raw === "") values.min_qty = null;
+    else {
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value <= 0) {
+        return { error: "Минимальная партия должна быть положительным целым числом" };
+      }
+      values.min_qty = value;
+    }
+  }
+  return { values };
+}
+
 
 
 app.get("/api/products", async (req, res) => {
   try {
     const r = await pool.query(
-      "SELECT id,name,category,notes,price,stock,active FROM products WHERE active=TRUE ORDER BY id"
+      `SELECT id,name,category,notes,price,stock,active,
+              brand,volume,sku,wholesale_price,min_qty
+       FROM products WHERE active=TRUE ORDER BY id`
     );
     res.json(r.rows);
   } catch (e) {
@@ -350,40 +427,61 @@ app.get("/api/admin/products", auth, async (req, res) => {
 });
 
 app.post("/api/admin/products", auth, async (req, res) => {
-  const { name, category, notes, price, stock } = req.body || {};
+  const product = req.body || {};
+  const { name, category, notes, price, stock } = product;
   if (!name || !category || !notes || !Number(price))
     return res.status(400).json({ error: "Нужны name/category/notes/price" });
+  const extension = validateProductExtensions(product);
+  if (extension.error) return res.status(400).json({ error: extension.error });
+  const { brand, volume, sku, wholesale_price, min_qty } = extension.values;
   try {
     const r = await pool.query(
-      `INSERT INTO products(name,category,notes,price,stock)
-       VALUES($1,$2,$3,$4,$5) RETURNING id`,
-      [name, category, notes, Number(price), Number(stock) || 0]
+      `INSERT INTO products(name,category,notes,price,stock,brand,volume,sku,wholesale_price,min_qty)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [name, category, notes, Number(price), Number(stock) || 0,
+       brand, volume, sku, wholesale_price, min_qty]
     );
     res.status(201).json({ id: r.rows[0].id });
   } catch (e) {
     console.error(e);
+    if (e.code === "23505") return res.status(409).json({ error: "Такой артикул уже существует" });
     res.status(500).json({ error: "Не удалось добавить товар" });
   }
 });
 
 app.patch("/api/admin/products/:id", auth, async (req, res) => {
   const p = req.body || {};
+  const extension = validateProductExtensions(p, true);
+  if (extension.error) return res.status(400).json({ error: extension.error });
+  const value = field => extension.values[field] ?? null;
+  const changes = field => hasOwn(extension.values, field);
   try {
     await pool.query(
       `UPDATE products SET
        name=COALESCE($1,name), category=COALESCE($2,category),
        notes=COALESCE($3,notes), price=COALESCE($4,price),
-       stock=COALESCE($5,stock), active=COALESCE($6,active)
-       WHERE id=$7`,
+       stock=COALESCE($5,stock), active=COALESCE($6,active),
+       brand=CASE WHEN $7 THEN $8 ELSE brand END,
+       volume=CASE WHEN $9 THEN $10 ELSE volume END,
+       sku=CASE WHEN $11 THEN $12 ELSE sku END,
+       wholesale_price=CASE WHEN $13 THEN $14 ELSE wholesale_price END,
+       min_qty=CASE WHEN $15 THEN $16 ELSE min_qty END
+       WHERE id=$17`,
       [
         p.name ?? null, p.category ?? null, p.notes ?? null,
         p.price ?? null, p.stock ?? null, p.active ?? null,
+        changes("brand"), value("brand"),
+        changes("volume"), value("volume"),
+        changes("sku"), value("sku"),
+        changes("wholesale_price"), value("wholesale_price"),
+        changes("min_qty"), value("min_qty"),
         Number(req.params.id)
       ]
     );
     res.json({ ok: true });
   } catch (e) {
     console.error(e);
+    if (e.code === "23505") return res.status(409).json({ error: "Такой артикул уже существует" });
     res.status(500).json({ error: "Ошибка базы данных" });
   }
 });

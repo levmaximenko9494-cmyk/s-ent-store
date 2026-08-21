@@ -43,8 +43,10 @@ function renderProducts(list = products) {
         </div>
 
         <div class="details">
-          <small>${p.notes}</small>
+          ${p.brand ? `<small class="product-brand">${p.brand}</small>` : ""}
           <h3>${p.name}</h3>
+          ${p.volume || p.sku ? `<div class="product-meta">${p.volume ? `<span>${p.volume}</span>` : ""}${p.sku ? `<span>Артикул: ${p.sku}</span>` : ""}</div>` : ""}
+          <small>${p.notes}</small>
 
           <div class="stock">
             ${
@@ -58,11 +60,11 @@ function renderProducts(list = products) {
 
           <div class="wholesale-info">
             <span>Оптовые условия</span>
-            <small>Минимальная партия и цены от количества — по запросу</small>
+            <small>${p.min_qty ? `Минимальная партия: ${p.min_qty} шт.` : "Минимальная партия и цены от количества — по запросу"}</small>
           </div>
 
           <div class="row">
-            <div class="price"><small>Цена за единицу</small><b>${money(p.price)}</b></div>
+            <div class="price"><small>${p.wholesale_price != null ? "Оптовая цена" : "Цена за единицу"}</small><b>${money(p.wholesale_price ?? p.price)}</b></div>
 
             <button
               class="add"
