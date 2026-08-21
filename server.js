@@ -117,6 +117,19 @@ async function initDb() {
     );
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS price_requests(
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      email TEXT NOT NULL,
+      company TEXT,
+      comment TEXT,
+      status TEXT NOT NULL DEFAULT 'new',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
   const products = [
     [1,"Santal 01","woody","Сандал · Кедр · Амбра",8900,20],
     [2,"Rose No. 7","floral","Роза · Ирис · Мускус",7600,18],
@@ -245,6 +258,29 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
+app.post("/api/price-requests", async (req, res) => {
+  const { name, phone, email, company, comment } = req.body || {};
+  const required = [name, phone, email];
+  if (required.some(value => typeof value !== "string" || !value.trim())) {
+    return res.status(400).json({ error: "Укажите имя, телефон и email" });
+  }
+  try {
+    const request = await pool.query(
+      `INSERT INTO price_requests(name,phone,email,company,comment)
+       VALUES($1,$2,$3,$4,$5) RETURNING id,status`,
+      [
+        name.trim(), phone.trim(), email.trim(),
+        typeof company === "string" ? company.trim() || null : null,
+        typeof comment === "string" ? comment.trim() || null : null
+      ]
+    );
+    res.status(201).json(request.rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Не удалось отправить запрос прайс-листа" });
+  }
+});
+
 app.post("/api/admin/login", loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body || {};
@@ -270,6 +306,19 @@ app.get("/api/admin/orders", auth, async (req, res) => {
       byOrder.get(item.order_id).push(item);
     }
     res.json(orders.map(o => ({ ...o, items: byOrder.get(o.id) || [] })));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Ошибка базы данных" });
+  }
+});
+
+app.get("/api/admin/price-requests", auth, async (req, res) => {
+  try {
+    const requests = await pool.query(
+      `SELECT id,name,phone,email,company,comment,status,created_at
+       FROM price_requests ORDER BY created_at DESC, id DESC`
+    );
+    res.json(requests.rows);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Ошибка базы данных" });

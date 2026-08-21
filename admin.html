@@ -2,8 +2,9 @@
 body{margin:0;background:#f5f1eb;color:#211d1a;font:14px Arial}main{max-width:1100px;margin:auto;padding:30px 20px}.brand{font:28px Georgia}.box{background:#fffdfa;border:1px solid #ddd5cc;padding:22px;margin:20px 0}input,select{padding:10px;border:1px solid #ccc;margin:4px}.btn{padding:10px 15px;background:#171310;color:#fff;border:0}.tabs button{padding:10px;margin-right:6px}.hidden{display:none}.order{border-top:1px solid #ddd;padding:15px 0}.status{padding:8px}.danger{background:#b4473c;color:white}</style></head><body><main>
 <div class="brand">SCENTÉVIA · ADMIN</div>
 <div id="login" class="box"><h2>Вход</h2><input id="email" placeholder="Email"><input id="pass" type="password" placeholder="Пароль"><button class="btn" onclick="login()">Войти</button><p id="err"></p></div>
-<div id="panel" class="hidden"><div class="tabs"><button onclick="show('orders')">Заказы</button><button onclick="show('products')">Товары</button><button onclick="logout()">Выйти</button></div>
+<div id="panel" class="hidden"><div class="tabs"><button onclick="show('orders')">Заказы</button><button onclick="show('priceRequests')">Запросы прайс-листа</button><button onclick="show('products')">Товары</button><button onclick="logout()">Выйти</button></div>
 <section id="orders" class="box"><h2>Заказы</h2><div id="ordersList"></div></section>
+<section id="priceRequests" class="box hidden"><h2>Запросы прайс-листа</h2><div id="priceRequestsList"></div></section>
 <section id="products" class="box hidden"><h2>Товары</h2><div id="productsList"></div><h3>Добавить товар</h3><input id="pn" placeholder="Название"><input id="pc" placeholder="Категория"><input id="pt" placeholder="Ноты"><input id="pp" type="number" placeholder="Цена"><input id="ps" type="number" placeholder="Остаток"><button class="btn" onclick="addProduct()">Добавить</button></section>
 </div></main><script>
 function getToken(){
@@ -17,7 +18,9 @@ const api=(u,o={})=>fetch(u,{...o,
     "Authorization":"Bearer "+getToken()
   }
 });
-function show(x){document.querySelectorAll("section").forEach(s=>s.classList.add("hidden"));document.getElementById(x).classList.remove("hidden");x==="orders"?loadOrders():loadProducts()}
+function show(x){document.querySelectorAll("section").forEach(s=>s.classList.add("hidden"));document.getElementById(x).classList.remove("hidden");if(x==="orders")loadOrders();else if(x==="priceRequests")loadPriceRequests();else loadProducts()}
+const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[char]));
+const formatDate=value=>new Intl.DateTimeFormat("ru-RU",{dateStyle:"medium",timeStyle:"short"}).format(new Date(value));
 async function login(){
 
   let r = await fetch("/api/admin/login", {
@@ -73,6 +76,18 @@ async function status(id,select){
     alert(e.message||"Не удалось изменить статус заказа");
   }finally{
     select.disabled=false;
+  }
+}
+async function loadPriceRequests(){
+  try{
+    const r=await api("/api/admin/price-requests");
+    if(r.status===401)return logout();
+    let requests;
+    try{requests=await r.json()}catch(e){requests=null}
+    if(!r.ok){priceRequestsList.textContent=(requests&&requests.error)||"Не удалось загрузить запросы.";return}
+    priceRequestsList.innerHTML=requests.length?requests.map(item=>`<div class="order"><b>Запрос #${item.id}</b> · ${escapeHtml(formatDate(item.created_at))}<br><b>${escapeHtml(item.name)}</b> · ${escapeHtml(item.phone)} · ${escapeHtml(item.email)}<br>Компания / ИП: ${escapeHtml(item.company)||"—"}<br>Комментарий: ${escapeHtml(item.comment)||"—"}<br>Статус: <b>${escapeHtml(item.status)}</b></div>`).join(""):"Запросов пока нет.";
+  }catch(e){
+    priceRequestsList.textContent="Не удалось связаться с сервером. Проверьте подключение.";
   }
 }
 async function loadProducts(){let r=await api("/api/admin/products");let a=await r.json();productsList.innerHTML=a.map(p=>`<div class="order"><b>${p.name}</b> · ${p.price.toLocaleString("ru-RU")} ₽ · остаток ${p.stock}<br>${p.notes}</div>`).join("")}

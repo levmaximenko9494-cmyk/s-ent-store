@@ -88,6 +88,37 @@ function openCart(){document.querySelector("#drawer").classList.add("open");rend
 document.querySelector("#cartOpen").onclick=openCart;document.querySelector("#cartClose").onclick=()=>document.querySelector("#drawer").classList.remove("open");
 document.querySelector("#checkout").onclick=()=>{if(!cart.length)return alert("Сначала добавьте товары в оптовую корзину.");document.querySelector("#drawer").classList.remove("open");document.querySelector("#modal").classList.add("open")};
 document.querySelector("#modalClose").onclick=()=>document.querySelector("#modal").classList.remove("open");
+const priceRequestModal=document.querySelector("#priceRequestModal");
+const priceRequestStatus=document.querySelector("#priceRequestStatus");
+document.querySelector("#priceRequestOpen").onclick=()=>{
+ priceRequestStatus.textContent="";
+ priceRequestStatus.className="form-status";
+ priceRequestModal.classList.add("open");
+};
+document.querySelector("#priceRequestClose").onclick=()=>priceRequestModal.classList.remove("open");
+document.querySelector("#priceRequestForm").onsubmit=async e=>{
+ e.preventDefault();
+ const button=e.submitter;
+ if(!button||button.disabled)return;
+ button.disabled=true;
+ priceRequestStatus.textContent="Отправляем запрос…";
+ priceRequestStatus.className="form-status";
+ try{
+  const f=new FormData(e.target);
+  const r=await fetch("/api/price-requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:f.get("name"),phone:f.get("phone"),email:f.get("email"),company:f.get("company"),comment:f.get("comment")})});
+  let data={};
+  try{data=await r.json()}catch(e){}
+  if(!r.ok)throw new Error(data.error||"Не удалось отправить запрос");
+  e.target.reset();
+  priceRequestStatus.textContent="Запрос отправлен. Менеджер свяжется с вами в ближайшее время.";
+  priceRequestStatus.className="form-status success";
+ }catch(error){
+  priceRequestStatus.textContent=error.message||"Не удалось связаться с сервером. Попробуйте ещё раз.";
+  priceRequestStatus.className="form-status error";
+ }finally{
+  button.disabled=false;
+ }
+};
 document.querySelector("#orderForm").onsubmit=async e=>{
  e.preventDefault();
  const button=e.submitter||e.target.querySelector('button[type="submit"], button:not([type])');
