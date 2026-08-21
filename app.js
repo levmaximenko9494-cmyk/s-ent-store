@@ -8,6 +8,22 @@ const products=[
 {id:7,name:"Ambre 24",category:"unisex",notes:"Амбра · Тонка · Ладан",price:9700,tone:"tone1"},
 {id:8,name:"Fleur Blanche",category:"unisex",notes:"Жасмин · Груша · Сандал",price:7800,tone:"tone4"}];
 let cart=JSON.parse(localStorage.getItem("scent-cart")||"[]");
+const reducedMotion=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+if(!reducedMotion) document.documentElement.classList.add("motion-ready");
+
+function initRevealAnimations(){
+ if(reducedMotion||!("IntersectionObserver" in window))return;
+ const targets=document.querySelectorAll("#catalog .section-top, #products, .story, .features, footer");
+ targets.forEach(target=>target.classList.add("reveal"));
+ const observer=new IntersectionObserver(entries=>{
+  entries.forEach(entry=>{
+   if(!entry.isIntersecting)return;
+   entry.target.classList.add("is-visible");
+   observer.unobserve(entry.target);
+  });
+ },{threshold:.12,rootMargin:"0px 0px -45px"});
+ targets.forEach(target=>observer.observe(target));
+}
 async function loadServerProducts(){
  try{
   const r=await fetch("/api/products"); if(!r.ok)return;
@@ -94,4 +110,4 @@ document.querySelector("#orderForm").onsubmit=async e=>{
  }
 };
 document.querySelector("#searchOpen").onclick=()=>{const q=prompt("Что ищем? Например: Rose");if(q===null)return;renderProducts(products.filter(p=>(p.name+" "+p.notes).toLowerCase().includes(q.toLowerCase())))};
-renderProducts();renderCart();loadServerProducts();
+renderProducts();renderCart();initRevealAnimations();loadServerProducts();
