@@ -100,13 +100,19 @@ async function initDb() {
       password_hash TEXT NOT NULL,
       contact_name TEXT NOT NULL,
       phone TEXT NOT NULL,
-      company TEXT NOT NULL,
-      inn TEXT NOT NULL,
+      company TEXT,
+      inn TEXT,
       status TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'approved', 'rejected', 'blocked')),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       approved_at TIMESTAMPTZ
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE partners
+      ALTER COLUMN company DROP NOT NULL,
+      ALTER COLUMN inn DROP NOT NULL;
   `);
 
   await pool.query(`
@@ -406,8 +412,8 @@ app.post("/api/price-requests", async (req, res) => {
 });
 
 app.post("/api/partners/register", partnerAuthLimiter, async (req, res) => {
-  const { email, password, contact_name, phone, company, inn } = req.body || {};
-  if ([email, password, contact_name, phone, company, inn]
+  const { email, password, contact_name, phone } = req.body || {};
+  if ([email, password, contact_name, phone]
     .some(value => typeof value !== "string" || !value.trim())) {
     return res.status(400).json({ error: "Заполните все поля регистрации" });
   }
@@ -425,9 +431,9 @@ app.post("/api/partners/register", partnerAuthLimiter, async (req, res) => {
     }
     const passwordHash = await bcrypt.hash(password, 12);
     const result = await pool.query(
-      `INSERT INTO partners(email,password_hash,contact_name,phone,company,inn)
-       VALUES($1,$2,$3,$4,$5,$6) RETURNING id,status`,
-      [normalizedEmail, passwordHash, contact_name.trim(), phone.trim(), company.trim(), inn.trim()]
+      `INSERT INTO partners(email,password_hash,contact_name,phone)
+       VALUES($1,$2,$3,$4) RETURNING id,status`,
+      [normalizedEmail, passwordHash, contact_name.trim(), phone.trim()]
     );
     res.status(201).json(result.rows[0]);
   } catch (e) {
@@ -523,7 +529,7 @@ app.get("/api/admin/price-requests", auth, async (req, res) => {
 app.get("/api/admin/partners", auth, async (req, res) => {
   try {
     const partners = await pool.query(
-      `SELECT id,email,contact_name,phone,company,inn,status,created_at,approved_at
+      `SELECT id,email,contact_name,phone,status,created_at,approved_at
        FROM partners
        ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END, created_at DESC, id DESC`
     );
