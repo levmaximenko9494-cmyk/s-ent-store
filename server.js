@@ -22,6 +22,9 @@ if (!SECRET) {
   process.exit(1);
 }
 
+// Partner tokens use a distinct signing key and cannot authenticate as admins.
+const PARTNER_SECRET = process.env.PARTNER_JWT_SECRET || `${SECRET}:partners`;
+
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is required");
   process.exit(1);
@@ -50,6 +53,33 @@ const auth = (req, res, next) => {
     return res.status(401).json({ error: "Недействительный токен" });
   }
 };
+const partnerAuth = async (req, res, next) => {
+  try {
+    const header = req.headers.authorization || "";
+    if (!header.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Требуется вход партнёра" });
+    }
+    const decoded = jwt.verify(header.slice(7), PARTNER_SECRET, { audience: "scent-partner" });
+    const partnerId = Number(decoded.sub);
+    if (!Number.isInteger(partnerId) || partnerId <= 0) {
+      return res.status(401).json({ error: "Недействительный токен партнёра" });
+    }
+    const result = await pool.query(
+      `SELECT id,email,contact_name,phone,company,inn,status,created_at,approved_at
+       FROM partners WHERE id=$1`,
+      [partnerId]
+    );
+    const partner = result.rows[0];
+    if (!partner) return res.status(401).json({ error: "Партнёр не найден" });
+    if (partner.status !== "approved") {
+      return res.status(403).json({ error: "Доступ партнёра приостановлен" });
+    }
+    req.partner = partner;
+    next();
+  } catch (e) {
+    return res.status(401).json({ error: "Недействительный токен партнёра" });
+  }
+};
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "100kb" }));
 app.use(express.static(__dirname));
@@ -60,6 +90,22 @@ async function initDb() {
       id SERIAL PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS partners(
+      id SERIAL PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      contact_name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      company TEXT NOT NULL,
+      inn TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'rejected', 'blocked')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      approved_at TIMESTAMPTZ
     );
   `);
 
@@ -203,6 +249,7 @@ async function initDb() {
 
 const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
+const partnerAuthLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
 app.use("/api/", apiLimiter);
 
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
@@ -358,6 +405,77 @@ app.post("/api/price-requests", async (req, res) => {
   }
 });
 
+app.post("/api/partners/register", partnerAuthLimiter, async (req, res) => {
+  const { email, password, contact_name, phone, company, inn } = req.body || {};
+  if ([email, password, contact_name, phone, company, inn]
+    .some(value => typeof value !== "string" || !value.trim())) {
+    return res.status(400).json({ error: "Заполните все поля регистрации" });
+  }
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return res.status(400).json({ error: "Укажите корректный email" });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ error: "Пароль должен содержать не менее 8 символов" });
+  }
+  try {
+    const existing = await pool.query("SELECT id FROM partners WHERE email=$1", [normalizedEmail]);
+    if (existing.rowCount) {
+      return res.status(409).json({ error: "Партнёр с таким email уже зарегистрирован" });
+    }
+    const passwordHash = await bcrypt.hash(password, 12);
+    const result = await pool.query(
+      `INSERT INTO partners(email,password_hash,contact_name,phone,company,inn)
+       VALUES($1,$2,$3,$4,$5,$6) RETURNING id,status`,
+      [normalizedEmail, passwordHash, contact_name.trim(), phone.trim(), company.trim(), inn.trim()]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (e) {
+    console.error(e);
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Партнёр с таким email уже зарегистрирован" });
+    }
+    res.status(500).json({ error: "Не удалось отправить заявку партнёра" });
+  }
+});
+
+app.post("/api/partners/login", partnerAuthLimiter, async (req, res) => {
+  const normalizedEmail = typeof req.body?.email === "string"
+    ? req.body.email.trim().toLowerCase()
+    : "";
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+  try {
+    const result = await pool.query(
+      "SELECT id,password_hash,status FROM partners WHERE email=$1",
+      [normalizedEmail]
+    );
+    const partner = result.rows[0];
+    if (!partner || !(await bcrypt.compare(password, partner.password_hash))) {
+      return res.status(401).json({ error: "Неверный email или пароль" });
+    }
+    if (partner.status === "pending") {
+      return res.status(403).json({ error: "Ваша заявка ожидает подтверждения" });
+    }
+    if (partner.status === "rejected") {
+      return res.status(403).json({ error: "Заявка партнёра отклонена. Свяжитесь с менеджером SCENTÉVIA" });
+    }
+    if (partner.status === "blocked") {
+      return res.status(403).json({ error: "Доступ партнёра заблокирован. Свяжитесь с менеджером SCENTÉVIA" });
+    }
+    const token = jwt.sign({}, PARTNER_SECRET, {
+      subject: String(partner.id), audience: "scent-partner", expiresIn: "8h"
+    });
+    res.json({ token });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Ошибка входа партнёра" });
+  }
+});
+
+app.get("/api/partners/me", partnerAuth, (req, res) => {
+  res.json(req.partner);
+});
+
 app.post("/api/admin/login", loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body || {};
@@ -399,6 +517,45 @@ app.get("/api/admin/price-requests", auth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Ошибка базы данных" });
+  }
+});
+
+app.get("/api/admin/partners", auth, async (req, res) => {
+  try {
+    const partners = await pool.query(
+      `SELECT id,email,contact_name,phone,company,inn,status,created_at,approved_at
+       FROM partners
+       ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END, created_at DESC, id DESC`
+    );
+    res.json(partners.rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Ошибка базы данных" });
+  }
+});
+
+app.patch("/api/admin/partners/:id/status", auth, async (req, res) => {
+  const allowed = ["approved", "rejected", "blocked"];
+  if (!allowed.includes(req.body?.status)) {
+    return res.status(400).json({ error: "Недопустимый статус партнёра" });
+  }
+  const partnerId = Number(req.params.id);
+  if (!Number.isInteger(partnerId) || partnerId <= 0) {
+    return res.status(400).json({ error: "Некорректный партнёр" });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE partners
+       SET status=$1,
+           approved_at=CASE WHEN $1='approved' THEN NOW() ELSE approved_at END
+       WHERE id=$2 RETURNING id,status,approved_at`,
+      [req.body.status, partnerId]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: "Партнёр не найден" });
+    res.json(result.rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Не удалось изменить статус партнёра" });
   }
 });
 

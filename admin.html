@@ -1,10 +1,11 @@
 <!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SCENTÉVIA — Admin</title><style>
-body{margin:0;background:#f5f1eb;color:#211d1a;font:14px Arial}main{max-width:1100px;margin:auto;padding:30px 20px}.brand{font:28px Georgia}.box{background:#fffdfa;border:1px solid #ddd5cc;padding:22px;margin:20px 0}input,select{padding:10px;border:1px solid #ccc;margin:4px}.btn{padding:10px 15px;background:#171310;color:#fff;border:0;cursor:pointer}.tabs button{padding:10px;margin-right:6px}.hidden{display:none}.order{border-top:1px solid #ddd;padding:15px 0}.status{padding:8px}.danger{background:#b4473c;color:white}.product-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.product-form label{display:grid;gap:4px;color:#766f68;font-size:12px}.product-form input{margin:0;min-width:0}.product-form .btn{align-self:end}.product-edit{background:#faf7f2;padding:16px;margin-top:12px}@media(max-width:700px){.product-form{grid-template-columns:1fr}}</style></head><body><main>
+body{margin:0;background:#f5f1eb;color:#211d1a;font:14px Arial}main{max-width:1100px;margin:auto;padding:30px 20px}.brand{font:28px Georgia}.box{background:#fffdfa;border:1px solid #ddd5cc;padding:22px;margin:20px 0}input,select{padding:10px;border:1px solid #ccc;margin:4px}.btn{padding:10px 15px;background:#171310;color:#fff;border:0;cursor:pointer}.tabs button{padding:10px;margin-right:6px}.hidden{display:none}.order{border-top:1px solid #ddd;padding:15px 0}.status{padding:8px}.danger{background:#b4473c;color:white}.product-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.product-form label{display:grid;gap:4px;color:#766f68;font-size:12px}.product-form input{margin:0;min-width:0}.product-form .btn{align-self:end}.product-edit{background:#faf7f2;padding:16px;margin-top:12px}.partner-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.partner-actions button{padding:8px 11px}.partner-actions button:disabled{opacity:.45;cursor:not-allowed}@media(max-width:700px){.product-form{grid-template-columns:1fr}}</style></head><body><main>
 <div class="brand">SCENTÉVIA · ADMIN</div>
 <div id="login" class="box"><h2>Вход</h2><input id="email" placeholder="Email"><input id="pass" type="password" placeholder="Пароль"><button class="btn" onclick="login()">Войти</button><p id="err"></p></div>
-<div id="panel" class="hidden"><div class="tabs"><button onclick="show('orders')">Заказы</button><button onclick="show('priceRequests')">Запросы прайс-листа</button><button onclick="show('products')">Товары</button><button onclick="logout()">Выйти</button></div>
+<div id="panel" class="hidden"><div class="tabs"><button onclick="show('orders')">Заказы</button><button onclick="show('priceRequests')">Запросы прайс-листа</button><button onclick="show('partners')">Партнёры</button><button onclick="show('products')">Товары</button><button onclick="logout()">Выйти</button></div>
 <section id="orders" class="box"><h2>Заказы</h2><div id="ordersList"></div></section>
 <section id="priceRequests" class="box hidden"><h2>Запросы прайс-листа</h2><div id="priceRequestsList"></div></section>
+<section id="partners" class="box hidden"><h2>Партнёры</h2><div id="partnersList"></div></section>
 <section id="products" class="box hidden"><h2>Товары</h2><div id="productsList"></div><h3>Добавить товар</h3><div class="product-form"><label>Название<input id="pn" required></label><label>Категория<input id="pc" required></label><label>Ноты<input id="pt" required></label><label>Текущая цена<input id="pp" type="number" min="1" step="1" required></label><label>Остаток<input id="ps" type="number" min="0" step="1"></label><label>Бренд<input id="pb"></label><label>Объём<input id="pv" placeholder="100 мл"></label><label>Артикул<input id="psku"></label><label>Оптовая цена<input id="pw" type="number" min="0" step="1"></label><label>Минимальная партия<input id="pmq" type="number" min="1" step="1"></label><button class="btn" onclick="addProduct()">Добавить товар</button></div></section>
 </div></main><script>
 function getToken(){
@@ -18,7 +19,7 @@ const api=(u,o={})=>fetch(u,{...o,
     "Authorization":"Bearer "+getToken()
   }
 });
-function show(x){document.querySelectorAll("section").forEach(s=>s.classList.add("hidden"));document.getElementById(x).classList.remove("hidden");if(x==="orders")loadOrders();else if(x==="priceRequests")loadPriceRequests();else loadProducts()}
+function show(x){document.querySelectorAll("section").forEach(s=>s.classList.add("hidden"));document.getElementById(x).classList.remove("hidden");if(x==="orders")loadOrders();else if(x==="priceRequests")loadPriceRequests();else if(x==="partners")loadPartners();else loadProducts()}
 const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[char]));
 const formatDate=value=>new Intl.DateTimeFormat("ru-RU",{dateStyle:"medium",timeStyle:"short"}).format(new Date(value));
 async function login(){
@@ -88,6 +89,34 @@ async function loadPriceRequests(){
     priceRequestsList.innerHTML=requests.length?requests.map(item=>`<div class="order"><b>Запрос #${item.id}</b> · ${escapeHtml(formatDate(item.created_at))}<br><b>${escapeHtml(item.name)}</b> · ${escapeHtml(item.phone)} · ${escapeHtml(item.email)}<br>Компания / ИП: ${escapeHtml(item.company)||"—"}<br>Комментарий: ${escapeHtml(item.comment)||"—"}<br>Статус: <b>${escapeHtml(item.status)}</b></div>`).join(""):"Запросов пока нет.";
   }catch(e){
     priceRequestsList.textContent="Не удалось связаться с сервером. Проверьте подключение.";
+  }
+}
+async function loadPartners(){
+  try{
+    const r=await api("/api/admin/partners");
+    if(r.status===401)return logout();
+    let partners;
+    try{partners=await r.json()}catch(e){partners=null}
+    if(!r.ok){partnersList.textContent=(partners&&partners.error)||"Не удалось загрузить партнёров.";return}
+    const labels={pending:"Ожидает",approved:"Одобрен",rejected:"Отклонён",blocked:"Заблокирован"};
+    partnersList.innerHTML=partners.length?partners.map(partner=>`<div class="order"><b>${escapeHtml(partner.company)}</b> · ИНН ${escapeHtml(partner.inn)}<br>${escapeHtml(partner.contact_name)} · ${escapeHtml(partner.phone)} · ${escapeHtml(partner.email)}<br>Регистрация: ${escapeHtml(formatDate(partner.created_at))}<br>Статус: <b>${escapeHtml(labels[partner.status]||partner.status)}</b><div class="partner-actions"><button class="btn" ${partner.status==="approved"?"disabled":""} onclick="changePartnerStatus(${partner.id},'approved',this)">Одобрить</button><button ${partner.status==="rejected"?"disabled":""} onclick="changePartnerStatus(${partner.id},'rejected',this)">Отклонить</button><button class="danger" ${partner.status==="blocked"?"disabled":""} onclick="changePartnerStatus(${partner.id},'blocked',this)">Заблокировать</button></div></div>`).join(""):"Заявок партнёров пока нет.";
+  }catch(e){
+    partnersList.textContent="Не удалось связаться с сервером. Проверьте подключение.";
+  }
+}
+async function changePartnerStatus(id,nextStatus,button){
+  if(button.disabled)return;
+  button.disabled=true;
+  try{
+    const r=await api(`/api/admin/partners/${id}/status`,{method:"PATCH",body:JSON.stringify({status:nextStatus})});
+    if(r.status===401)return logout();
+    let data={};
+    try{data=await r.json()}catch(e){}
+    if(!r.ok)throw new Error(data.error||"Не удалось изменить статус партнёра");
+    await loadPartners();
+  }catch(e){
+    alert(e.message||"Не удалось изменить статус партнёра");
+    button.disabled=false;
   }
 }
 async function loadProducts(){

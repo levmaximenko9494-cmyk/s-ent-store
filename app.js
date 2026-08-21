@@ -121,6 +121,64 @@ document.querySelector("#priceRequestForm").onsubmit=async e=>{
   button.disabled=false;
  }
 };
+const partnerModal=document.querySelector("#partnerModal");
+const partnerStatus=document.querySelector("#partnerStatus");
+const partnerLoginForm=document.querySelector("#partnerLoginForm");
+const partnerRegisterForm=document.querySelector("#partnerRegisterForm");
+function showPartnerTab(tab){
+ document.querySelectorAll("[data-partner-tab]").forEach(button=>button.classList.toggle("active",button.dataset.partnerTab===tab));
+ partnerLoginForm.hidden=tab!=="login";
+ partnerRegisterForm.hidden=tab!=="register";
+ partnerStatus.textContent="";
+ partnerStatus.className="form-status";
+}
+document.querySelector("#partnerOpen").onclick=()=>{showPartnerTab("login");partnerModal.classList.add("open")};
+document.querySelector("#partnerClose").onclick=()=>partnerModal.classList.remove("open");
+document.querySelectorAll("[data-partner-tab]").forEach(button=>button.onclick=()=>showPartnerTab(button.dataset.partnerTab));
+partnerRegisterForm.onsubmit=async e=>{
+ e.preventDefault();
+ const button=e.submitter;
+ if(!button||button.disabled)return;
+ button.disabled=true;
+ partnerStatus.textContent="Отправляем заявку…";
+ partnerStatus.className="form-status";
+ try{
+  const f=new FormData(e.target);
+  const r=await fetch("/api/partners/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(f))});
+  let data={};
+  try{data=await r.json()}catch(e){}
+  if(!r.ok)throw new Error(data.error||"Не удалось отправить заявку");
+  e.target.reset();
+  partnerStatus.textContent="Заявка отправлена. После проверки мы откроем доступ к оптовым условиям SCENTÉVIA.";
+  partnerStatus.className="form-status success";
+ }catch(error){
+  partnerStatus.textContent=error.message||"Не удалось связаться с сервером. Попробуйте ещё раз.";
+  partnerStatus.className="form-status error";
+ }finally{button.disabled=false}
+};
+partnerLoginForm.onsubmit=async e=>{
+ e.preventDefault();
+ const button=e.submitter;
+ if(!button||button.disabled)return;
+ button.disabled=true;
+ partnerStatus.textContent="Проверяем данные…";
+ partnerStatus.className="form-status";
+ try{
+  const f=new FormData(e.target);
+  const r=await fetch("/api/partners/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(f))});
+  let data={};
+  try{data=await r.json()}catch(e){}
+  if(!r.ok)throw new Error(data.error||"Не удалось войти");
+  localStorage.setItem("scent-partner-token",data.token);
+  e.target.reset();
+  partnerStatus.textContent="Вход выполнен. Партнёрский доступ подтверждён.";
+  partnerStatus.className="form-status success";
+ }catch(error){
+  localStorage.removeItem("scent-partner-token");
+  partnerStatus.textContent=error.message||"Не удалось связаться с сервером. Попробуйте ещё раз.";
+  partnerStatus.className="form-status error";
+ }finally{button.disabled=false}
+};
 document.querySelector("#orderForm").onsubmit=async e=>{
  e.preventDefault();
  const button=e.submitter||e.target.querySelector('button[type="submit"], button:not([type])');
