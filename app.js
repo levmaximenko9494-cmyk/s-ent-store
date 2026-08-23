@@ -35,20 +35,21 @@ async function loadServerProducts(){
  }catch(e){}
 }
 const money=n=>n.toLocaleString("ru-RU")+" ₽";
+const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
 function renderProducts(list = products) {
   document.querySelector("#products").innerHTML = list.length
     ? list.map(p => `
       <article class="product">
 
-        <div class="visual ${p.tone}">
-          <div class="mini"></div>
+        <div class="visual product-photo-wrap">
+          <div class="product-photo-placeholder"><span>SCENTÉVIA</span><small>Фото товара скоро появится</small></div>
+          ${p.image_url ? `<img class="product-photo" src="${escapeHtml(p.image_url)}" alt="${escapeHtml(`${p.brand ? `${p.brand} ` : ""}${p.name}`)}" loading="lazy" onerror="this.remove()">` : ""}
         </div>
 
         <div class="details">
-          ${p.brand ? `<small class="product-brand">${p.brand}</small>` : ""}
-          <h3>${p.name}</h3>
-          ${p.volume || p.sku ? `<div class="product-meta">${p.volume ? `<span>${p.volume}</span>` : ""}${p.sku ? `<span>Артикул: ${p.sku}</span>` : ""}</div>` : ""}
-          <small>${p.notes}</small>
+          ${p.brand ? `<small class="product-brand">${escapeHtml(p.brand)}</small>` : ""}
+          <h3>${escapeHtml(p.name)}</h3>
+          ${p.volume || p.sku ? `<div class="product-meta">${p.volume ? `<span>${escapeHtml(p.volume)}</span>` : ""}${p.sku ? `<span>Артикул: ${escapeHtml(p.sku)}</span>` : ""}</div>` : ""}
 
           <div class="stock">
             ${
@@ -61,18 +62,14 @@ function renderProducts(list = products) {
           </div>
 
           <div class="wholesale-info">
-            <span>Оптовые условия</span>
-            <small>${p.min_qty ? `Минимальная партия: ${p.min_qty} шт.` : "Минимальная партия и цены от количества — по запросу"}</small>
+            <span>Оптовая поставка</span>
+            ${p.min_qty ? `<small>Минимальная партия: ${p.min_qty} шт.</small>` : ""}
+            <b>Актуальная оптовая цена — по запросу</b>
           </div>
 
-          <div class="row">
-            <div class="price"><small>${p.wholesale_price != null ? "Оптовая цена" : "Цена за единицу"}</small><b>${money(p.wholesale_price ?? p.price)}</b></div>
-
-            <button
-              class="add"
-              onclick="addToCart(${p.id})"
-              ${p.stock <= 0 ? "disabled" : ""}
-            >
+          <div class="catalog-actions">
+            <button class="price-request" type="button" onclick="requestProductPrice(${p.id})">Запросить цену</button>
+            <button class="add" onclick="addToCart(${p.id})" ${p.stock <= 0 ? "disabled" : ""}>
               ${p.stock <= 0 ? "Нет в наличии" : "В корзину"}
             </button>
           </div>
@@ -94,13 +91,24 @@ document.querySelector("#checkout").onclick=()=>{if(!cart.length)return alert("�
 document.querySelector("#modalClose").onclick=()=>document.querySelector("#modal").classList.remove("open");
 const priceRequestModal=document.querySelector("#priceRequestModal");
 const priceRequestStatus=document.querySelector("#priceRequestStatus");
-document.querySelector("#priceRequestOpen").onclick=()=>{
+const priceRequestForm=document.querySelector("#priceRequestForm");
+function openPriceRequest(product=null){
  priceRequestStatus.textContent="";
  priceRequestStatus.className="form-status";
+ if(product){
+  const reference=[product.brand,product.name,product.volume,product.sku&&`арт. ${product.sku}`].filter(Boolean).join(" · ");
+  priceRequestForm.elements.comment.value=`Интересует актуальная оптовая цена: ${reference}`;
+ }
  priceRequestModal.classList.add("open");
-};
+}
+function requestProductPrice(id){
+ const product=products.find(item=>item.id===id);
+ if(product)openPriceRequest(product);
+}
+window.requestProductPrice=requestProductPrice;
+document.querySelector("#priceRequestOpen").onclick=()=>openPriceRequest();
 document.querySelector("#priceRequestClose").onclick=()=>priceRequestModal.classList.remove("open");
-document.querySelector("#priceRequestForm").onsubmit=async e=>{
+priceRequestForm.onsubmit=async e=>{
  e.preventDefault();
  const button=e.submitter;
  if(!button||button.disabled)return;
