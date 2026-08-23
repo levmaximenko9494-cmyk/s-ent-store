@@ -8,6 +8,8 @@ const products=[
 {id:7,name:"Ambre 24",category:"unisex",notes:"Амбра · Тонка · Ладан",price:9700,tone:"tone1"},
 {id:8,name:"Fleur Blanche",category:"unisex",notes:"Жасмин · Груша · Сандал",price:7800,tone:"tone4"}];
 let cart=JSON.parse(localStorage.getItem("scent-cart")||"[]");
+const PARTNER_TOKEN_KEY="scent-partner-token";
+let approvedPartner=null;
 const reducedMotion=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 if(!reducedMotion) document.documentElement.classList.add("motion-ready");
 
@@ -125,6 +127,8 @@ const partnerModal=document.querySelector("#partnerModal");
 const partnerStatus=document.querySelector("#partnerStatus");
 const partnerLoginForm=document.querySelector("#partnerLoginForm");
 const partnerRegisterForm=document.querySelector("#partnerRegisterForm");
+const partnerOpen=document.querySelector("#partnerOpen");
+const partnerLogout=document.querySelector("#partnerLogout");
 function showPartnerTab(tab){
  document.querySelectorAll("[data-partner-tab]").forEach(button=>button.classList.toggle("active",button.dataset.partnerTab===tab));
  partnerLoginForm.hidden=tab!=="login";
@@ -132,7 +136,7 @@ function showPartnerTab(tab){
  partnerStatus.textContent="";
  partnerStatus.className="form-status";
 }
-document.querySelector("#partnerOpen").onclick=()=>{showPartnerTab("login");partnerModal.classList.add("open")};
+partnerOpen.onclick=()=>{showPartnerTab("login");partnerModal.classList.add("open")};
 document.querySelector("#partnerClose").onclick=()=>partnerModal.classList.remove("open");
 document.querySelectorAll("[data-partner-tab]").forEach(button=>button.onclick=()=>showPartnerTab(button.dataset.partnerTab));
 partnerRegisterForm.onsubmit=async e=>{
@@ -169,16 +173,41 @@ partnerLoginForm.onsubmit=async e=>{
   let data={};
   try{data=await r.json()}catch(e){}
   if(!r.ok)throw new Error(data.error||"Не удалось войти");
-  localStorage.setItem("scent-partner-token",data.token);
+  localStorage.setItem(PARTNER_TOKEN_KEY,data.token);
   e.target.reset();
-  partnerStatus.textContent="Вход выполнен. Партнёрский доступ подтверждён.";
-  partnerStatus.className="form-status success";
+  await restorePartnerSession();
+  partnerModal.classList.remove("open");
  }catch(error){
-  localStorage.removeItem("scent-partner-token");
+  localStorage.removeItem(PARTNER_TOKEN_KEY);
   partnerStatus.textContent=error.message||"Не удалось связаться с сервером. Попробуйте ещё раз.";
   partnerStatus.className="form-status error";
  }finally{button.disabled=false}
 };
+function updatePartnerUi(){
+ partnerOpen.textContent=approvedPartner?.contact_name||"Для партнёров";
+ partnerLogout.hidden=!approvedPartner;
+ document.body.classList.toggle("partner-approved",Boolean(approvedPartner));
+}
+async function clearPartnerSession(){
+ localStorage.removeItem(PARTNER_TOKEN_KEY);
+ approvedPartner=null;
+ updatePartnerUi();
+ await loadServerProducts();
+}
+async function restorePartnerSession(){
+ const token=localStorage.getItem(PARTNER_TOKEN_KEY);
+ if(!token){approvedPartner=null;updatePartnerUi();await loadServerProducts();return}
+ try{
+  const me=await fetch("/api/partners/me",{headers:{Authorization:`Bearer ${token}`}});
+  if(!me.ok)throw new Error("Сессия недействительна");
+  const partner=await me.json();
+  if(partner.status!=="approved")throw new Error("Нет партнёрского доступа");
+  approvedPartner=partner;
+  updatePartnerUi();
+  await loadServerProducts();
+ }catch(e){await clearPartnerSession()}
+}
+partnerLogout.onclick=clearPartnerSession;
 document.querySelector("#orderForm").onsubmit=async e=>{
  e.preventDefault();
  const button=e.submitter||e.target.querySelector('button[type="submit"], button:not([type])');
@@ -201,4 +230,4 @@ document.querySelector("#orderForm").onsubmit=async e=>{
  }
 };
 document.querySelector("#searchOpen").onclick=()=>{const q=prompt("Что ищем? Например: Rose");if(q===null)return;renderProducts(products.filter(p=>(p.name+" "+p.notes).toLowerCase().includes(q.toLowerCase())))};
-renderProducts();renderCart();initRevealAnimations();loadServerProducts();
+renderProducts();renderCart();initRevealAnimations();restorePartnerSession();
