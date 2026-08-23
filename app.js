@@ -51,27 +51,8 @@ function renderProducts(list = products) {
           <h3>${escapeHtml(p.name)}</h3>
           ${p.volume || p.sku ? `<div class="product-meta">${p.volume ? `<span>${escapeHtml(p.volume)}</span>` : ""}${p.sku ? `<span>Артикул: ${escapeHtml(p.sku)}</span>` : ""}</div>` : ""}
 
-          <div class="stock">
-            ${
-              p.stock <= 0
-                ? "Нет в наличии"
-                : p.stock <= 3
-                  ? `Осталось ${p.stock} шт.`
-                  : `В наличии: ${p.stock} шт.`
-            }
-          </div>
-
-          <div class="wholesale-info">
-            <span>Оптовая поставка</span>
-            ${p.min_qty ? `<small>Минимальная партия: ${p.min_qty} шт.</small>` : ""}
-            <b>Актуальная оптовая цена — по запросу</b>
-          </div>
-
           <div class="catalog-actions">
             <button class="price-request" type="button" onclick="requestProductPrice(${p.id})">Запросить цену</button>
-            <button class="add" onclick="addToCart(${p.id})" ${p.stock <= 0 ? "disabled" : ""}>
-              ${p.stock <= 0 ? "Нет в наличии" : "В корзину"}
-            </button>
           </div>
         </div>
 
