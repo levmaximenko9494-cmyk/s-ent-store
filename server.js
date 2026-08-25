@@ -6,6 +6,9 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import path from "path";
+import crypto from "crypto";
+import multer from "multer";
+import ExcelJS from "exceljs";
 import { fileURLToPath } from "url";
 
 dotenv.config();
@@ -83,6 +86,17 @@ const partnerAuth = async (req, res, next) => {
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "100kb" }));
 app.use(express.static(__dirname));
+
+const xlsxUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, callback) => {
+    const extension = path.extname(file.originalname).toLowerCase();
+    callback(extension === ".xlsx" ? null : new Error("Разрешены только XLSX-файлы"), extension === ".xlsx");
+  }
+});
+const importPreviews = new Map();
+const PREVIEW_TTL_MS = 30 * 60 * 1000;
 
 async function initDb() {
   await pool.query(`
@@ -219,6 +233,47 @@ async function initDb() {
     );
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS suppliers(
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      default_markup_percent NUMERIC(7,2),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (default_markup_percent IS NULL OR default_markup_percent >= 0)
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS supplier_offers(
+      id BIGSERIAL PRIMARY KEY,
+      supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+      supplier_sku TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      purchase_price NUMERIC(14,2) NOT NULL CHECK (purchase_price >= 0),
+      currency CHAR(3) NOT NULL DEFAULT 'USD',
+      automatic_sale_price NUMERIC(14,2),
+      manual_sale_price NUMERIC(14,2),
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (supplier_id, supplier_sku),
+      CHECK (automatic_sale_price IS NULL OR automatic_sale_price >= 0),
+      CHECK (manual_sale_price IS NULL OR manual_sale_price >= 0)
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS supplier_price_history(
+      id BIGSERIAL PRIMARY KEY,
+      supplier_offer_id BIGINT NOT NULL REFERENCES supplier_offers(id) ON DELETE CASCADE,
+      old_price NUMERIC(14,2) NOT NULL,
+      new_price NUMERIC(14,2) NOT NULL,
+      changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
   const products = [
     [1,"Santal 01","woody","Сандал · Кедр · Амбра",8900,20],
     [2,"Rose No. 7","floral","Роза · Ирис · Мускус",7600,18],
@@ -294,6 +349,80 @@ function validateProductExtensions(product, partial = false) {
     }
   }
   return { values };
+}
+
+function excelCellValue(cell) {
+  const value = cell?.value;
+  if (value == null) return "";
+  if (typeof value === "string" || typeof value === "number") return value;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "result")) return value.result ?? "";
+    if (Array.isArray(value.richText)) return value.richText.map(part => part.text ?? "").join("");
+    if (typeof value.text === "string") return value.text;
+  }
+  return cell.text || "";
+}
+const normalizeHeader = value => String(value ?? "").trim().toLocaleLowerCase("ru-RU");
+function normalizePurchasePrice(value) {
+  if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? value : null;
+  const text = String(value ?? "").trim().replace(/\s/g, "").replace(/\$/g, "");
+  if (!text) return null;
+  let normalized = text;
+  if (text.includes(",") && text.includes(".")) {
+    normalized = text.lastIndexOf(",") > text.lastIndexOf(".")
+      ? text.replace(/\./g, "").replace(",", ".")
+      : text.replace(/,/g, "");
+  } else if (text.includes(",")) {
+    normalized = text.replace(",", ".");
+  }
+  const price = Number(normalized);
+  return Number.isFinite(price) && price >= 0 ? price : null;
+}
+async function parseXlsxPrice(buffer) {
+  const workbook = new ExcelJS.Workbook();
+  try {
+    await workbook.xlsx.load(buffer, { ignoreNodes: ["dataValidations"] });
+  } catch (error) {
+    throw new Error("Файл повреждён или не является поддерживаемым XLSX-файлом");
+  }
+  const sheet = workbook.worksheets[0];
+  if (!sheet) throw new Error("В XLSX нет листов с данными");
+  const wanted = { "артикул": "supplier_sku", "наименование": "original_name", "цена": "purchase_price" };
+  let headerRowNumber = -1;
+  let columns = null;
+  for (let rowNumber = 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    const row = sheet.getRow(rowNumber);
+    const normalized = Array.from({ length: row.cellCount }, (_, index) =>
+      normalizeHeader(excelCellValue(row.getCell(index + 1)))
+    );
+    if (Object.keys(wanted).every(header => normalized.includes(header))) {
+      headerRowNumber = rowNumber;
+      columns = Object.fromEntries(Object.entries(wanted).map(([header, field]) => [field, normalized.indexOf(header)]));
+      break;
+    }
+  }
+  if (headerRowNumber < 0) throw new Error("Не найдена строка заголовков: Артикул, Наименование, Цена");
+
+  const items = [];
+  let skipped = 0;
+  const seen = new Set();
+  for (let rowNumber = headerRowNumber + 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    const row = sheet.getRow(rowNumber);
+    const values = Array.from({ length: row.cellCount }, (_, index) => excelCellValue(row.getCell(index + 1)));
+    if (values.every(value => String(value ?? "").trim() === "")) continue;
+    const supplierSku = String(excelCellValue(row.getCell(columns.supplier_sku + 1)) ?? "").trim();
+    const originalName = String(excelCellValue(row.getCell(columns.original_name + 1)) ?? "");
+    const purchasePrice = normalizePurchasePrice(excelCellValue(row.getCell(columns.purchase_price + 1)));
+    if (!supplierSku || !originalName.trim() || purchasePrice === null || seen.has(supplierSku)) {
+      skipped += 1;
+      continue;
+    }
+    seen.add(supplierSku);
+    items.push({ supplier_sku: supplierSku, original_name: originalName, purchase_price: purchasePrice.toFixed(2) });
+  }
+  if (!items.length) throw new Error("В файле нет корректных позиций для импорта");
+  return { items, skipped, foundColumns: ["Артикул", "Наименование", "Цена"] };
 }
 
 
@@ -577,6 +706,205 @@ app.patch("/api/admin/orders/:id", auth, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Ошибка базы данных" });
+  }
+});
+
+app.get("/api/admin/suppliers", auth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT s.id,s.name,s.active,s.default_markup_percent,s.created_at,s.updated_at,
+              COUNT(o.id)::int AS offers_count,
+              COUNT(o.id) FILTER (WHERE o.active)::int AS active_offers_count
+       FROM suppliers s LEFT JOIN supplier_offers o ON o.supplier_id=s.id
+       GROUP BY s.id ORDER BY s.name,s.id`
+    );
+    res.json(result.rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Не удалось загрузить поставщиков" });
+  }
+});
+
+app.post("/api/admin/suppliers", auth, async (req, res) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const markupRaw = req.body?.default_markup_percent;
+  const markup = markupRaw === "" || markupRaw == null ? null : Number(markupRaw);
+  if (!name) return res.status(400).json({ error: "Укажите название поставщика" });
+  if (markup !== null && (!Number.isFinite(markup) || markup < 0)) {
+    return res.status(400).json({ error: "Наценка должна быть неотрицательным числом" });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO suppliers(name,default_markup_percent) VALUES($1,$2)
+       RETURNING id,name,active,default_markup_percent,created_at,updated_at`,
+      [name, markup]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Не удалось создать поставщика" });
+  }
+});
+
+app.patch("/api/admin/suppliers/:id", auth, async (req, res) => {
+  const supplierId = Number(req.params.id);
+  if (!Number.isInteger(supplierId) || supplierId <= 0) {
+    return res.status(400).json({ error: "Некорректный поставщик" });
+  }
+  const hasActive = hasOwn(req.body || {}, "active");
+  const hasMarkup = hasOwn(req.body || {}, "default_markup_percent");
+  if (!hasActive && !hasMarkup) return res.status(400).json({ error: "Нет изменений" });
+  if (hasActive && typeof req.body.active !== "boolean") {
+    return res.status(400).json({ error: "active должен быть логическим значением" });
+  }
+  const markupRaw = req.body?.default_markup_percent;
+  const markup = markupRaw === "" || markupRaw == null ? null : Number(markupRaw);
+  if (hasMarkup && markup !== null && (!Number.isFinite(markup) || markup < 0)) {
+    return res.status(400).json({ error: "Наценка должна быть неотрицательным числом" });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE suppliers SET
+         active=CASE WHEN $1 THEN $2 ELSE active END,
+         default_markup_percent=CASE WHEN $3 THEN $4 ELSE default_markup_percent END,
+         updated_at=NOW()
+       WHERE id=$5 RETURNING id,name,active,default_markup_percent,created_at,updated_at`,
+      [hasActive, hasActive ? req.body.active : null, hasMarkup, markup, supplierId]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: "Поставщик не найден" });
+    res.json(result.rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Не удалось изменить поставщика" });
+  }
+});
+
+app.get("/api/admin/suppliers/:id/offers", auth, async (req, res) => {
+  const supplierId = Number(req.params.id);
+  if (!Number.isInteger(supplierId) || supplierId <= 0) {
+    return res.status(400).json({ error: "Некорректный поставщик" });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT id,supplier_sku,original_name,purchase_price,currency,active,imported_at,updated_at
+       FROM supplier_offers WHERE supplier_id=$1 ORDER BY active DESC,supplier_sku LIMIT 500`,
+      [supplierId]
+    );
+    res.json(result.rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Не удалось загрузить предложения" });
+  }
+});
+
+const receiveXlsx = (req, res, next) => xlsxUpload.single("file")(req, res, error => {
+  if (error) return res.status(400).json({ error: error.message || "Не удалось загрузить XLSX" });
+  next();
+});
+
+app.post("/api/admin/suppliers/:id/import-preview", auth, receiveXlsx, async (req, res) => {
+  const supplierId = Number(req.params.id);
+  if (!Number.isInteger(supplierId) || supplierId <= 0 || !req.file) {
+    return res.status(400).json({ error: req.file ? "Некорректный поставщик" : "Выберите XLSX-файл" });
+  }
+  try {
+    const supplier = await pool.query("SELECT id FROM suppliers WHERE id=$1", [supplierId]);
+    if (!supplier.rowCount) return res.status(404).json({ error: "Поставщик не найден" });
+    const parsed = await parseXlsxPrice(req.file.buffer);
+    const previewToken = crypto.randomUUID();
+    const now = Date.now();
+    for (const [token, preview] of importPreviews) {
+      if (preview.expiresAt <= now) importPreviews.delete(token);
+    }
+    importPreviews.set(previewToken, {
+      supplierId, adminId: req.admin.id, fileName: req.file.originalname,
+      items: parsed.items, skipped: parsed.skipped, expiresAt: now + PREVIEW_TTL_MS
+    });
+    res.json({
+      previewToken, fileName: req.file.originalname, foundColumns: parsed.foundColumns,
+      validRows: parsed.items.length, skippedRows: parsed.skipped,
+      sample: parsed.items.slice(0, 5), currency: "USD", expiresInMinutes: 30
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({ error: e.message || "Не удалось прочитать XLSX" });
+  }
+});
+
+app.post("/api/admin/suppliers/:id/import-confirm", auth, async (req, res) => {
+  const supplierId = Number(req.params.id);
+  const previewToken = typeof req.body?.previewToken === "string" ? req.body.previewToken : "";
+  const preview = importPreviews.get(previewToken);
+  if (!preview || preview.expiresAt <= Date.now()) {
+    if (preview) importPreviews.delete(previewToken);
+    return res.status(400).json({ error: "Предпросмотр не найден или истёк. Загрузите файл снова." });
+  }
+  if (preview.supplierId !== supplierId || preview.adminId !== req.admin.id) {
+    return res.status(403).json({ error: "Предпросмотр создан для другого поставщика или администратора" });
+  }
+  importPreviews.delete(previewToken);
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const supplier = await client.query("SELECT id FROM suppliers WHERE id=$1 FOR UPDATE", [supplierId]);
+    if (!supplier.rowCount) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Поставщик не найден" });
+    }
+    let created = 0;
+    let priceChanged = 0;
+    let unchanged = 0;
+    for (const item of preview.items) {
+      const existing = await client.query(
+        `SELECT id,purchase_price FROM supplier_offers
+         WHERE supplier_id=$1 AND supplier_sku=$2 FOR UPDATE`,
+        [supplierId, item.supplier_sku]
+      );
+      if (!existing.rowCount) {
+        await client.query(
+          `INSERT INTO supplier_offers
+             (supplier_id,supplier_sku,original_name,purchase_price,currency,active,imported_at,updated_at)
+           VALUES($1,$2,$3,$4,'USD',TRUE,NOW(),NOW())`,
+          [supplierId, item.supplier_sku, item.original_name, item.purchase_price]
+        );
+        created += 1;
+        continue;
+      }
+      const offer = existing.rows[0];
+      const changed = Number(offer.purchase_price) !== Number(item.purchase_price);
+      if (changed) {
+        await client.query(
+          `INSERT INTO supplier_price_history(supplier_offer_id,old_price,new_price)
+           VALUES($1,$2,$3)`,
+          [offer.id, offer.purchase_price, item.purchase_price]
+        );
+        priceChanged += 1;
+      } else {
+        unchanged += 1;
+      }
+      await client.query(
+        `UPDATE supplier_offers SET original_name=$1,purchase_price=$2,currency='USD',
+           active=TRUE,imported_at=NOW(),updated_at=NOW() WHERE id=$3`,
+        [item.original_name, item.purchase_price, offer.id]
+      );
+    }
+    const deactivated = await client.query(
+      `UPDATE supplier_offers SET active=FALSE,updated_at=NOW()
+       WHERE supplier_id=$1 AND active=TRUE AND NOT (supplier_sku = ANY($2::text[]))`,
+      [supplierId, preview.items.map(item => item.supplier_sku)]
+    );
+    await client.query("COMMIT");
+    res.json({
+      processed: preview.items.length, created, priceChanged, unchanged,
+      deactivated: deactivated.rowCount, skipped: preview.skipped
+    });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    console.error(e);
+    res.status(500).json({ error: "Импорт отменён: данные не были изменены" });
+  } finally {
+    client.release();
   }
 });
 

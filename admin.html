@@ -1,11 +1,12 @@
 <!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SCENTÉVIA — Admin</title><style>
-body{margin:0;background:#f5f1eb;color:#211d1a;font:14px Arial}main{max-width:1100px;margin:auto;padding:30px 20px}.brand{font:28px Georgia}.box{background:#fffdfa;border:1px solid #ddd5cc;padding:22px;margin:20px 0}input,select{padding:10px;border:1px solid #ccc;margin:4px}.btn{padding:10px 15px;background:#171310;color:#fff;border:0;cursor:pointer}.tabs button{padding:10px;margin-right:6px}.hidden{display:none}.order{border-top:1px solid #ddd;padding:15px 0}.status{padding:8px}.danger{background:#b4473c;color:white}.product-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.product-form label{display:grid;gap:4px;color:#766f68;font-size:12px}.product-form input{margin:0;min-width:0}.product-form .btn{align-self:end}.product-edit{background:#faf7f2;padding:16px;margin-top:12px}.partner-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.partner-actions button{padding:8px 11px}.partner-actions button:disabled{opacity:.45;cursor:not-allowed}@media(max-width:700px){.product-form{grid-template-columns:1fr}}</style></head><body><main>
+body{margin:0;background:#f5f1eb;color:#211d1a;font:14px Arial}main{max-width:1100px;margin:auto;padding:30px 20px}.brand{font:28px Georgia}.box{background:#fffdfa;border:1px solid #ddd5cc;padding:22px;margin:20px 0}input,select{padding:10px;border:1px solid #ccc;margin:4px}.btn{padding:10px 15px;background:#171310;color:#fff;border:0;cursor:pointer}.tabs button{padding:10px;margin-right:6px}.hidden{display:none}.order{border-top:1px solid #ddd;padding:15px 0}.status{padding:8px}.danger{background:#b4473c;color:white}.product-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.product-form label{display:grid;gap:4px;color:#766f68;font-size:12px}.product-form input{margin:0;min-width:0}.product-form .btn{align-self:end}.product-edit{background:#faf7f2;padding:16px;margin-top:12px}.partner-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.partner-actions button{padding:8px 11px}.partner-actions button:disabled,.btn:disabled{opacity:.45;cursor:not-allowed}.supplier-card{background:#faf7f2;padding:16px;margin-top:12px}.supplier-row,.import-row{display:flex;flex-wrap:wrap;align-items:end;gap:8px}.supplier-row label{display:grid;color:#766f68;font-size:12px}.preview{margin-top:14px;padding:14px;border:1px solid #ddd5cc;background:white}.preview table{width:100%;border-collapse:collapse;margin:10px 0}.preview th,.preview td{text-align:left;border-bottom:1px solid #eee;padding:7px}.muted{color:#766f68}@media(max-width:700px){.product-form{grid-template-columns:1fr}}</style></head><body><main>
 <div class="brand">SCENTÉVIA · ADMIN</div>
 <div id="login" class="box"><h2>Вход</h2><input id="email" placeholder="Email"><input id="pass" type="password" placeholder="Пароль"><button class="btn" onclick="login()">Войти</button><p id="err"></p></div>
-<div id="panel" class="hidden"><div class="tabs"><button onclick="show('orders')">Заказы</button><button onclick="show('priceRequests')">Запросы прайс-листа</button><button onclick="show('partners')">Партнёры</button><button onclick="show('products')">Товары</button><button onclick="logout()">Выйти</button></div>
+<div id="panel" class="hidden"><div class="tabs"><button onclick="show('orders')">Заказы</button><button onclick="show('priceRequests')">Запросы прайс-листа</button><button onclick="show('partners')">Партнёры</button><button onclick="show('suppliers')">Поставщики</button><button onclick="show('products')">Товары</button><button onclick="logout()">Выйти</button></div>
 <section id="orders" class="box"><h2>Заказы</h2><div id="ordersList"></div></section>
 <section id="priceRequests" class="box hidden"><h2>Запросы прайс-листа</h2><div id="priceRequestsList"></div></section>
 <section id="partners" class="box hidden"><h2>Партнёры</h2><div id="partnersList"></div></section>
+<section id="suppliers" class="box hidden"><h2>Поставщики</h2><div class="supplier-row"><label>Название<input id="supplierName"></label><label>Стандартная наценка, %<input id="supplierMarkup" type="number" min="0" step="0.01"></label><button class="btn" onclick="addSupplier()">Создать поставщика</button></div><p class="muted">Импортированные закупочные цены хранятся отдельно от публичного каталога.</p><div id="suppliersList"></div></section>
 <section id="products" class="box hidden"><h2>Товары</h2><div id="productsList"></div><h3>Добавить товар</h3><div class="product-form"><label>Название<input id="pn" required></label><label>Категория<input id="pc" required></label><label>Ноты<input id="pt" required></label><label>Текущая цена<input id="pp" type="number" min="1" step="1" required></label><label>Остаток<input id="ps" type="number" min="0" step="1"></label><label>Бренд<input id="pb"></label><label>Объём<input id="pv" placeholder="100 мл"></label><label>Артикул<input id="psku"></label><label>Оптовая цена<input id="pw" type="number" min="0" step="1"></label><label>Минимальная партия<input id="pmq" type="number" min="1" step="1"></label><button class="btn" onclick="addProduct()">Добавить товар</button></div></section>
 </div></main><script>
 function getToken(){
@@ -14,12 +15,12 @@ function getToken(){
 
 const api=(u,o={})=>fetch(u,{...o,
   headers:{
-    "Content-Type":"application/json",
+    ...(!(o.body instanceof FormData)?{"Content-Type":"application/json"}:{}),
     ...(o.headers||{}),
     "Authorization":"Bearer "+getToken()
   }
 });
-function show(x){document.querySelectorAll("section").forEach(s=>s.classList.add("hidden"));document.getElementById(x).classList.remove("hidden");if(x==="orders")loadOrders();else if(x==="priceRequests")loadPriceRequests();else if(x==="partners")loadPartners();else loadProducts()}
+function show(x){document.querySelectorAll("section").forEach(s=>s.classList.add("hidden"));document.getElementById(x).classList.remove("hidden");if(x==="orders")loadOrders();else if(x==="priceRequests")loadPriceRequests();else if(x==="partners")loadPartners();else if(x==="suppliers")loadSuppliers();else loadProducts()}
 const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[char]));
 const formatDate=value=>new Intl.DateTimeFormat("ru-RU",{dateStyle:"medium",timeStyle:"short"}).format(new Date(value));
 async function login(){
@@ -118,6 +119,71 @@ async function changePartnerStatus(id,nextStatus,button){
     alert(e.message||"Не удалось изменить статус партнёра");
     button.disabled=false;
   }
+}
+async function loadSuppliers(){
+  const list=document.getElementById("suppliersList");
+  try{
+    const r=await api("/api/admin/suppliers");
+    if(r.status===401)return logout();
+    const data=await r.json();
+    if(!r.ok){list.textContent=data.error||"Не удалось загрузить поставщиков";return}
+    list.innerHTML=data.length?data.map(supplier=>`<div class="supplier-card" data-supplier-id="${supplier.id}"><div class="supplier-row"><b>${escapeHtml(supplier.name)}</b><span>${supplier.active?"Активен":"Отключён"}</span><span>Предложений: ${supplier.active_offers_count} активных / ${supplier.offers_count} всего</span><label>Наценка, %<input data-role="markup" type="number" min="0" step="0.01" value="${escapeHtml(supplier.default_markup_percent)}"></label><button onclick="saveSupplierMarkup(${supplier.id},this)">Сохранить наценку</button><button class="${supplier.active?"danger":"btn"}" onclick="toggleSupplier(${supplier.id},${!supplier.active},this)">${supplier.active?"Отключить":"Включить"}</button></div><h4>Импорт XLSX</h4><div class="import-row"><input data-role="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"><button class="btn" onclick="previewImport(${supplier.id},this)">Предпросмотр</button></div><div data-role="import-output"></div></div>`).join(""):"Поставщиков пока нет.";
+  }catch(e){list.textContent="Не удалось связаться с сервером."}
+}
+async function addSupplier(){
+  const name=document.getElementById("supplierName");
+  const markup=document.getElementById("supplierMarkup");
+  const r=await api("/api/admin/suppliers",{method:"POST",body:JSON.stringify({name:name.value,default_markup_percent:markup.value})});
+  const data=await r.json();
+  if(!r.ok){alert(data.error||"Не удалось создать поставщика");return}
+  name.value="";markup.value="";await loadSuppliers();
+}
+async function saveSupplierMarkup(id,button){
+  const card=button.closest(".supplier-card");
+  button.disabled=true;
+  try{
+    const r=await api(`/api/admin/suppliers/${id}`,{method:"PATCH",body:JSON.stringify({default_markup_percent:card.querySelector('[data-role="markup"]').value})});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||"Не удалось сохранить наценку");
+    await loadSuppliers();
+  }catch(e){alert(e.message)}finally{button.disabled=false}
+}
+async function toggleSupplier(id,active,button){
+  button.disabled=true;
+  try{
+    const r=await api(`/api/admin/suppliers/${id}`,{method:"PATCH",body:JSON.stringify({active})});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||"Не удалось изменить поставщика");
+    await loadSuppliers();
+  }catch(e){alert(e.message);button.disabled=false}
+}
+async function previewImport(id,button){
+  const card=button.closest(".supplier-card");
+  const file=card.querySelector('[data-role="file"]').files[0];
+  const output=card.querySelector('[data-role="import-output"]');
+  if(!file){alert("Выберите XLSX-файл");return}
+  const form=new FormData();form.append("file",file);
+  button.disabled=true;output.textContent="Чтение файла…";
+  try{
+    const r=await api(`/api/admin/suppliers/${id}/import-preview`,{method:"POST",body:form});
+    if(r.status===401)return logout();
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||"Не удалось подготовить предпросмотр");
+    const rows=data.sample.map(item=>`<tr><td>${escapeHtml(item.supplier_sku)}</td><td>${escapeHtml(item.original_name)}</td><td>${escapeHtml(item.purchase_price)} ${escapeHtml(data.currency)}</td></tr>`).join("");
+    output.innerHTML=`<div class="preview" data-preview-token="${escapeHtml(data.previewToken)}"><b>${escapeHtml(data.fileName)}</b><p>Колонки: ${data.foundColumns.map(escapeHtml).join(", ")} · Валюта: <b>${escapeHtml(data.currency)}</b></p><p>Корректных строк: <b>${data.validRows}</b> · Пропущено/ошибок: <b>${data.skippedRows}</b></p><table><thead><tr><th>Артикул</th><th>Наименование</th><th>Цена</th></tr></thead><tbody>${rows}</tbody></table><button class="btn" onclick="confirmImport(${id},this)">Подтвердить импорт</button> <span class="muted">Предпросмотр действует ${data.expiresInMinutes} минут.</span></div>`;
+  }catch(e){output.textContent=e.message||"Ошибка предпросмотра"}finally{button.disabled=false}
+}
+async function confirmImport(id,button){
+  const preview=button.closest(".preview");
+  const token=preview.dataset.previewToken;
+  button.disabled=true;
+  try{
+    const r=await api(`/api/admin/suppliers/${id}/import-confirm`,{method:"POST",body:JSON.stringify({previewToken:token})});
+    if(r.status===401)return logout();
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||"Не удалось выполнить импорт");
+    preview.innerHTML=`<b>Импорт завершён</b><p>Обработано: ${data.processed} · Новых: ${data.created} · Изменили цену: ${data.priceChanged} · Без изменений: ${data.unchanged} · Деактивировано: ${data.deactivated} · Пропущено/ошибок: ${data.skipped}</p>`;
+  }catch(e){alert(e.message);button.disabled=false}
 }
 async function loadProducts(){
   const r=await api("/api/admin/products");
