@@ -784,9 +784,49 @@ app.get("/api/admin/suppliers/:id/offers", auth, async (req, res) => {
   if (!Number.isInteger(supplierId) || supplierId <= 0) {
     return res.status(400).json({ error: "Некорректный поставщик" });
   }
+  const paginationRequested = ["search", "page", "limit"].some(key => hasOwn(req.query, key));
+  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+  const page = req.query.page == null || req.query.page === "" ? 1 : Number(req.query.page);
+  const limit = req.query.limit == null || req.query.limit === "" ? 25 : Number(req.query.limit);
+  if (search.length > 200) {
+    return res.status(400).json({ error: "Поисковый запрос слишком длинный" });
+  }
+  if (paginationRequested && (!Number.isInteger(page) || page < 1)) {
+    return res.status(400).json({ error: "Некорректный номер страницы" });
+  }
+  if (paginationRequested && ![25, 50, 100].includes(limit)) {
+    return res.status(400).json({ error: "Допустимое количество строк: 25, 50 или 100" });
+  }
   try {
+    if (paginationRequested) {
+      const where = search
+        ? "supplier_id=$1 AND (supplier_sku ILIKE $2 OR original_name ILIKE $2)"
+        : "supplier_id=$1";
+      const values = search ? [supplierId, `%${search}%`] : [supplierId];
+      const limitParameter = values.length + 1;
+      const offsetParameter = values.length + 2;
+      const [countResult, offersResult] = await Promise.all([
+        pool.query(`SELECT COUNT(*)::int AS total FROM supplier_offers WHERE ${where}`, values),
+        pool.query(
+          `SELECT id,supplier_sku,original_name,purchase_price,currency,
+                  automatic_sale_price,manual_sale_price,active,imported_at,updated_at
+           FROM supplier_offers WHERE ${where}
+           ORDER BY active DESC,supplier_sku,id LIMIT $${limitParameter} OFFSET $${offsetParameter}`,
+          [...values, limit, (page - 1) * limit]
+        )
+      ]);
+      const total = countResult.rows[0].total;
+      return res.json({
+        items: offersResult.rows,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      });
+    }
     const result = await pool.query(
-      `SELECT id,supplier_sku,original_name,purchase_price,currency,active,imported_at,updated_at
+      `SELECT id,supplier_sku,original_name,purchase_price,currency,
+              automatic_sale_price,manual_sale_price,active,imported_at,updated_at
        FROM supplier_offers WHERE supplier_id=$1 ORDER BY active DESC,supplier_sku LIMIT 500`,
       [supplierId]
     );

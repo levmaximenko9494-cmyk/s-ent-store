@@ -1,5 +1,5 @@
 <!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SCENTÉVIA — Admin</title><style>
-body{margin:0;background:#f5f1eb;color:#211d1a;font:14px Arial}main{max-width:1100px;margin:auto;padding:30px 20px}.brand{font:28px Georgia}.box{background:#fffdfa;border:1px solid #ddd5cc;padding:22px;margin:20px 0}input,select{padding:10px;border:1px solid #ccc;margin:4px}.btn{padding:10px 15px;background:#171310;color:#fff;border:0;cursor:pointer}.tabs button{padding:10px;margin-right:6px}.hidden{display:none}.order{border-top:1px solid #ddd;padding:15px 0}.status{padding:8px}.danger{background:#b4473c;color:white}.product-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.product-form label{display:grid;gap:4px;color:#766f68;font-size:12px}.product-form input{margin:0;min-width:0}.product-form .btn{align-self:end}.product-edit{background:#faf7f2;padding:16px;margin-top:12px}.partner-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.partner-actions button{padding:8px 11px}.partner-actions button:disabled,.btn:disabled{opacity:.45;cursor:not-allowed}.supplier-card{background:#faf7f2;padding:16px;margin-top:12px}.supplier-row,.import-row{display:flex;flex-wrap:wrap;align-items:end;gap:8px}.supplier-row label{display:grid;color:#766f68;font-size:12px}.preview{margin-top:14px;padding:14px;border:1px solid #ddd5cc;background:white}.preview table{width:100%;border-collapse:collapse;margin:10px 0}.preview th,.preview td{text-align:left;border-bottom:1px solid #eee;padding:7px}.muted{color:#766f68}@media(max-width:700px){.product-form{grid-template-columns:1fr}}</style></head><body><main>
+body{margin:0;background:#f5f1eb;color:#211d1a;font:14px Arial}main{max-width:1100px;margin:auto;padding:30px 20px}.brand{font:28px Georgia}.box{background:#fffdfa;border:1px solid #ddd5cc;padding:22px;margin:20px 0}input,select{padding:10px;border:1px solid #ccc;margin:4px}.btn{padding:10px 15px;background:#171310;color:#fff;border:0;cursor:pointer}.tabs button{padding:10px;margin-right:6px}.hidden{display:none}.order{border-top:1px solid #ddd;padding:15px 0}.status{padding:8px}.danger{background:#b4473c;color:white}.product-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.product-form label{display:grid;gap:4px;color:#766f68;font-size:12px}.product-form input{margin:0;min-width:0}.product-form .btn{align-self:end}.product-edit{background:#faf7f2;padding:16px;margin-top:12px}.partner-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.partner-actions button{padding:8px 11px}.partner-actions button:disabled,.btn:disabled{opacity:.45;cursor:not-allowed}.supplier-card{background:#faf7f2;padding:16px;margin-top:12px}.supplier-row,.import-row,.offers-toolbar,.offers-pagination{display:flex;flex-wrap:wrap;align-items:end;gap:8px}.supplier-row label,.offers-toolbar label{display:grid;color:#766f68;font-size:12px}.offers-panel{margin-top:14px;padding:14px;border:1px solid #ddd5cc;background:white}.offers-table-wrap{overflow-x:auto}.offers-table{width:100%;border-collapse:collapse;margin:10px 0;min-width:940px}.offers-table th,.offers-table td{text-align:left;border-bottom:1px solid #eee;padding:7px;vertical-align:top}.offers-pagination{align-items:center;justify-content:flex-end}.preview{margin-top:14px;padding:14px;border:1px solid #ddd5cc;background:white}.preview table{width:100%;border-collapse:collapse;margin:10px 0}.preview th,.preview td{text-align:left;border-bottom:1px solid #eee;padding:7px}.muted{color:#766f68}@media(max-width:700px){.product-form{grid-template-columns:1fr}}</style></head><body><main>
 <div class="brand">SCENTÉVIA · ADMIN</div>
 <div id="login" class="box"><h2>Вход</h2><input id="email" placeholder="Email"><input id="pass" type="password" placeholder="Пароль"><button class="btn" onclick="login()">Войти</button><p id="err"></p></div>
 <div id="panel" class="hidden"><div class="tabs"><button onclick="show('orders')">Заказы</button><button onclick="show('priceRequests')">Запросы прайс-листа</button><button onclick="show('partners')">Партнёры</button><button onclick="show('suppliers')">Поставщики</button><button onclick="show('products')">Товары</button><button onclick="logout()">Выйти</button></div>
@@ -127,7 +127,7 @@ async function loadSuppliers(){
     if(r.status===401)return logout();
     const data=await r.json();
     if(!r.ok){list.textContent=data.error||"Не удалось загрузить поставщиков";return}
-    list.innerHTML=data.length?data.map(supplier=>`<div class="supplier-card" data-supplier-id="${supplier.id}"><div class="supplier-row"><b>${escapeHtml(supplier.name)}</b><span>${supplier.active?"Активен":"Отключён"}</span><span>Предложений: ${supplier.active_offers_count} активных / ${supplier.offers_count} всего</span><label>Наценка, %<input data-role="markup" type="number" min="0" step="0.01" value="${escapeHtml(supplier.default_markup_percent)}"></label><button onclick="saveSupplierMarkup(${supplier.id},this)">Сохранить наценку</button><button class="${supplier.active?"danger":"btn"}" onclick="toggleSupplier(${supplier.id},${!supplier.active},this)">${supplier.active?"Отключить":"Включить"}</button></div><h4>Импорт XLSX</h4><div class="import-row"><input data-role="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"><button class="btn" onclick="previewImport(${supplier.id},this)">Предпросмотр</button></div><div data-role="import-output"></div></div>`).join(""):"Поставщиков пока нет.";
+    list.innerHTML=data.length?data.map(supplier=>`<div class="supplier-card" data-supplier-id="${supplier.id}"><div class="supplier-row"><b>${escapeHtml(supplier.name)}</b><span>${supplier.active?"Активен":"Отключён"}</span><span>Предложений: ${supplier.active_offers_count} активных / ${supplier.offers_count} всего</span><label>Наценка, %<input data-role="markup" type="number" min="0" step="0.01" value="${escapeHtml(supplier.default_markup_percent)}"></label><button onclick="saveSupplierMarkup(${supplier.id},this)">Сохранить наценку</button><button class="${supplier.active?"danger":"btn"}" onclick="toggleSupplier(${supplier.id},${!supplier.active},this)">${supplier.active?"Отключить":"Включить"}</button><button class="btn" onclick="toggleOffers(${supplier.id},this)">Предложения</button></div><div data-role="offers-output"></div><h4>Импорт XLSX</h4><div class="import-row"><input data-role="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"><button class="btn" onclick="previewImport(${supplier.id},this)">Предпросмотр</button></div><div data-role="import-output"></div></div>`).join(""):"Поставщиков пока нет.";
   }catch(e){list.textContent="Не удалось связаться с сервером."}
 }
 async function addSupplier(){
@@ -156,6 +156,52 @@ async function toggleSupplier(id,active,button){
     if(!r.ok)throw new Error(data.error||"Не удалось изменить поставщика");
     await loadSuppliers();
   }catch(e){alert(e.message);button.disabled=false}
+}
+function formatPrice(value){
+  if(value==null||value==="")return "—";
+  const number=Number(value);
+  return Number.isFinite(number)?number.toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2}):escapeHtml(value);
+}
+async function toggleOffers(id,button){
+  const output=button.closest(".supplier-card").querySelector('[data-role="offers-output"]');
+  if(output.innerHTML){output.innerHTML="";button.textContent="Предложения";return}
+  output.innerHTML=`<div class="offers-panel"><form class="offers-toolbar" onsubmit="searchOffers(${id},this);return false"><label>Поиск по артикулу или наименованию<input data-role="offers-search" type="search" maxlength="200"></label><label>Строк на странице<select data-role="offers-limit" onchange="changeOffersLimit(${id},this)"><option>25</option><option>50</option><option>100</option></select></label><button class="btn" type="submit">Найти</button><button type="button" onclick="clearOffersSearch(${id},this)">Сбросить</button></form><div data-role="offers-results"></div></div>`;
+  button.textContent="Скрыть предложения";
+  await loadSupplierOffers(id,1);
+}
+function offersPanel(id){
+  return document.querySelector(`.supplier-card[data-supplier-id="${id}"] [data-role="offers-output"]`);
+}
+async function searchOffers(id,form){
+  await loadSupplierOffers(id,1,form.querySelector('[data-role="offers-search"]').value);
+}
+async function clearOffersSearch(id,button){
+  const form=button.closest("form");
+  form.querySelector('[data-role="offers-search"]').value="";
+  await loadSupplierOffers(id,1,"");
+}
+async function changeOffersLimit(id,select){
+  await loadSupplierOffers(id,1,select.closest("form").querySelector('[data-role="offers-search"]').value);
+}
+async function loadSupplierOffers(id,page,search){
+  const panel=offersPanel(id);
+  if(!panel)return;
+  const form=panel.querySelector("form");
+  const results=panel.querySelector('[data-role="offers-results"]');
+  const searchInput=form.querySelector('[data-role="offers-search"]');
+  if(search!==undefined)searchInput.value=search;
+  const params=new URLSearchParams({search:searchInput.value.trim(),page:String(page),limit:form.querySelector('[data-role="offers-limit"]').value});
+  results.textContent="Загрузка предложений…";
+  try{
+    const r=await api(`/api/admin/suppliers/${id}/offers?${params}`);
+    if(r.status===401)return logout();
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||"Не удалось загрузить предложения");
+    const rows=data.items.map(item=>`<tr><td>${escapeHtml(item.supplier_sku)}</td><td>${escapeHtml(item.original_name)}</td><td>${formatPrice(item.purchase_price)}</td><td>${escapeHtml(item.currency)}</td><td>${formatPrice(item.automatic_sale_price)}</td><td>${formatPrice(item.manual_sale_price)}</td><td>${item.active?"active":"inactive"}</td><td>${escapeHtml(formatDate(item.imported_at))}</td></tr>`).join("");
+    const from=data.total?(data.page-1)*data.limit+1:0;
+    const to=Math.min(data.page*data.limit,data.total);
+    results.innerHTML=`<p>Найдено позиций: <b>${data.total}</b>${data.total?` · показаны ${from}–${to}`:""}</p><div class="offers-table-wrap"><table class="offers-table"><thead><tr><th>Артикул поставщика</th><th>Исходное наименование</th><th>Закупочная цена</th><th>Валюта</th><th>Автоматическая продажная цена</th><th>Ручная продажная цена</th><th>Статус</th><th>Последний импорт</th></tr></thead><tbody>${rows||'<tr><td colspan="8">Предложения не найдены.</td></tr>'}</tbody></table></div><div class="offers-pagination"><button ${data.page<=1?"disabled":""} onclick="loadSupplierOffers(${id},${data.page-1})">Назад</button><span>Страница ${data.totalPages?data.page:0} из ${data.totalPages}</span><button ${data.page>=data.totalPages?"disabled":""} onclick="loadSupplierOffers(${id},${data.page+1})">Вперёд</button></div>`;
+  }catch(e){results.textContent=e.message||"Не удалось загрузить предложения"}
 }
 async function previewImport(id,button){
   const card=button.closest(".supplier-card");
