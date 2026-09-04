@@ -279,11 +279,35 @@ async function initDb() {
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       active BOOLEAN NOT NULL DEFAULT TRUE,
-      default_markup_percent NUMERIC(7,2),
+      default_markup_percent NUMERIC(7,2) NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      CHECK (default_markup_percent IS NULL OR default_markup_percent >= 0)
+      CHECK (default_markup_percent >= 0)
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE suppliers
+      ADD COLUMN IF NOT EXISTS default_markup_percent NUMERIC(7,2);
+    UPDATE suppliers SET default_markup_percent=0 WHERE default_markup_percent IS NULL;
+    ALTER TABLE suppliers
+      ALTER COLUMN default_markup_percent SET DEFAULT 0,
+      ALTER COLUMN default_markup_percent SET NOT NULL;
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname='suppliers_default_markup_nonnegative'
+          AND conrelid='suppliers'::regclass
+      ) THEN
+        ALTER TABLE suppliers ADD CONSTRAINT suppliers_default_markup_nonnegative
+          CHECK (default_markup_percent >= 0);
+      END IF;
+    END
+    $$;
   `);
 
   await pool.query(`
@@ -854,9 +878,11 @@ app.get("/api/admin/suppliers", auth, async (req, res) => {
 app.post("/api/admin/suppliers", auth, async (req, res) => {
   const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
   const markupRaw = req.body?.default_markup_percent;
-  const markup = markupRaw === "" || markupRaw == null ? null : Number(markupRaw);
+  const markup = markupRaw === "" || markupRaw == null ? 0 : Number(markupRaw);
   if (!name) return res.status(400).json({ error: "Укажите название поставщика" });
-  if (markup !== null && (!Number.isFinite(markup) || markup < 0)) {
+  if ((typeof markupRaw !== "string" && typeof markupRaw !== "number" && markupRaw != null) ||
+      (typeof markupRaw === "string" && markupRaw !== "" && !markupRaw.trim()) ||
+      !Number.isFinite(markup) || markup < 0 || markup > 99999.99) {
     return res.status(400).json({ error: "Наценка должна быть неотрицательным числом" });
   }
   try {
@@ -884,8 +910,10 @@ app.patch("/api/admin/suppliers/:id", auth, async (req, res) => {
     return res.status(400).json({ error: "active должен быть логическим значением" });
   }
   const markupRaw = req.body?.default_markup_percent;
-  const markup = markupRaw === "" || markupRaw == null ? null : Number(markupRaw);
-  if (hasMarkup && markup !== null && (!Number.isFinite(markup) || markup < 0)) {
+  const markup = hasMarkup ? Number(markupRaw) : 0;
+  if (hasMarkup && ((typeof markupRaw !== "string" && typeof markupRaw !== "number") ||
+      (typeof markupRaw === "string" && !markupRaw.trim()) ||
+      !Number.isFinite(markup) || markup < 0 || markup > 99999.99)) {
     return res.status(400).json({ error: "Наценка должна быть неотрицательным числом" });
   }
   try {
@@ -926,18 +954,23 @@ app.get("/api/admin/suppliers/:id/offers", auth, async (req, res) => {
   try {
     if (paginationRequested) {
       const where = search
-        ? "supplier_id=$1 AND (supplier_sku ILIKE $2 OR original_name ILIKE $2)"
-        : "supplier_id=$1";
+        ? "o.supplier_id=$1 AND (o.supplier_sku ILIKE $2 OR o.original_name ILIKE $2)"
+        : "o.supplier_id=$1";
       const values = search ? [supplierId, `%${search}%`] : [supplierId];
       const limitParameter = values.length + 1;
       const offsetParameter = values.length + 2;
       const [countResult, offersResult] = await Promise.all([
-        pool.query(`SELECT COUNT(*)::int AS total FROM supplier_offers WHERE ${where}`, values),
+        pool.query(`SELECT COUNT(*)::int AS total FROM supplier_offers o WHERE ${where}`, values),
         pool.query(
-          `SELECT id,supplier_sku,original_name,purchase_price,currency,
-                  automatic_sale_price,manual_sale_price,active,imported_at,updated_at
-           FROM supplier_offers WHERE ${where}
-           ORDER BY active DESC,supplier_sku,id LIMIT $${limitParameter} OFFSET $${offsetParameter}`,
+          `SELECT o.id,o.supplier_sku,o.original_name,o.purchase_price,o.currency,
+                  s.default_markup_percent,
+                  ROUND(o.purchase_price * (1 + s.default_markup_percent / 100),2)
+                    AS automatic_sale_price,
+                  o.manual_sale_price,o.active,o.imported_at,o.updated_at
+           FROM supplier_offers o JOIN suppliers s ON s.id=o.supplier_id
+           WHERE ${where}
+           ORDER BY o.active DESC,o.supplier_sku,o.id
+           LIMIT $${limitParameter} OFFSET $${offsetParameter}`,
           [...values, limit, (page - 1) * limit]
         )
       ]);
@@ -951,9 +984,13 @@ app.get("/api/admin/suppliers/:id/offers", auth, async (req, res) => {
       });
     }
     const result = await pool.query(
-      `SELECT id,supplier_sku,original_name,purchase_price,currency,
-              automatic_sale_price,manual_sale_price,active,imported_at,updated_at
-       FROM supplier_offers WHERE supplier_id=$1 ORDER BY active DESC,supplier_sku LIMIT 500`,
+      `SELECT o.id,o.supplier_sku,o.original_name,o.purchase_price,o.currency,
+              s.default_markup_percent,
+              ROUND(o.purchase_price * (1 + s.default_markup_percent / 100),2)
+                AS automatic_sale_price,
+              o.manual_sale_price,o.active,o.imported_at,o.updated_at
+       FROM supplier_offers o JOIN suppliers s ON s.id=o.supplier_id
+       WHERE o.supplier_id=$1 ORDER BY o.active DESC,o.supplier_sku LIMIT 500`,
       [supplierId]
     );
     res.json(result.rows);
