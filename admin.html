@@ -1,5 +1,5 @@
 <!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SCENTÉVIA — Admin</title><style>
-body{margin:0;background:#f5f1eb;color:#211d1a;font:14px Arial}main{max-width:1100px;margin:auto;padding:30px 20px}.brand{font:28px Georgia}.box{background:#fffdfa;border:1px solid #ddd5cc;padding:22px;margin:20px 0}input,select{padding:10px;border:1px solid #ccc;margin:4px}.btn{padding:10px 15px;background:#171310;color:#fff;border:0;cursor:pointer}.tabs button{padding:10px;margin-right:6px}.hidden{display:none}.order{border-top:1px solid #ddd;padding:15px 0}.status{padding:8px}.danger{background:#b4473c;color:white}.product-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.product-form label{display:grid;gap:4px;color:#766f68;font-size:12px}.product-form input{margin:0;min-width:0}.product-form .btn{align-self:end}.product-edit{background:#faf7f2;padding:16px;margin-top:12px}.partner-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.partner-actions button{padding:8px 11px}.partner-actions button:disabled,.btn:disabled{opacity:.45;cursor:not-allowed}.supplier-card{background:#faf7f2;padding:16px;margin-top:12px}.supplier-row,.import-row,.offers-toolbar,.offers-pagination{display:flex;flex-wrap:wrap;align-items:end;gap:8px}.supplier-row label,.offers-toolbar label{display:grid;color:#766f68;font-size:12px}.offers-panel{margin-top:14px;padding:14px;border:1px solid #ddd5cc;background:white}.offers-table-wrap{overflow-x:auto}.offers-table{width:100%;border-collapse:collapse;margin:10px 0;min-width:940px}.offers-table th,.offers-table td{text-align:left;border-bottom:1px solid #eee;padding:7px;vertical-align:top}.offers-pagination{align-items:center;justify-content:flex-end}.preview{margin-top:14px;padding:14px;border:1px solid #ddd5cc;background:white}.preview table{width:100%;border-collapse:collapse;margin:10px 0}.preview th,.preview td{text-align:left;border-bottom:1px solid #eee;padding:7px}.muted{color:#766f68}@media(max-width:700px){.product-form{grid-template-columns:1fr}}</style></head><body><main>
+body{margin:0;background:#f5f1eb;color:#211d1a;font:14px Arial}main{max-width:1100px;margin:auto;padding:30px 20px}.brand{font:28px Georgia}.box{background:#fffdfa;border:1px solid #ddd5cc;padding:22px;margin:20px 0}input,select{padding:10px;border:1px solid #ccc;margin:4px}.btn{padding:10px 15px;background:#171310;color:#fff;border:0;cursor:pointer}.tabs button{padding:10px;margin-right:6px}.hidden{display:none}.order{border-top:1px solid #ddd;padding:15px 0}.status{padding:8px}.danger{background:#b4473c;color:white}.product-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.product-form label{display:grid;gap:4px;color:#766f68;font-size:12px}.product-form input{margin:0;min-width:0}.product-form .btn{align-self:end}.product-edit{background:#faf7f2;padding:16px;margin-top:12px}.partner-actions,.price-request-actions{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-top:12px}.partner-actions button{padding:8px 11px}.partner-actions button:disabled,.btn:disabled{opacity:.45;cursor:not-allowed}.send-result{margin:8px 0 0}.supplier-card{background:#faf7f2;padding:16px;margin-top:12px}.supplier-row,.import-row,.offers-toolbar,.offers-pagination{display:flex;flex-wrap:wrap;align-items:end;gap:8px}.supplier-row label,.offers-toolbar label{display:grid;color:#766f68;font-size:12px}.offers-panel{margin-top:14px;padding:14px;border:1px solid #ddd5cc;background:white}.offers-table-wrap{overflow-x:auto}.offers-table{width:100%;border-collapse:collapse;margin:10px 0;min-width:940px}.offers-table th,.offers-table td{text-align:left;border-bottom:1px solid #eee;padding:7px;vertical-align:top}.offers-pagination{align-items:center;justify-content:flex-end}.preview{margin-top:14px;padding:14px;border:1px solid #ddd5cc;background:white}.preview table{width:100%;border-collapse:collapse;margin:10px 0}.preview th,.preview td{text-align:left;border-bottom:1px solid #eee;padding:7px}.muted{color:#766f68}@media(max-width:700px){.product-form{grid-template-columns:1fr}}</style></head><body><main>
 <div class="brand">SCENTÉVIA · ADMIN</div>
 <div id="login" class="box"><h2>Вход</h2><input id="email" placeholder="Email"><input id="pass" type="password" placeholder="Пароль"><button class="btn" onclick="login()">Войти</button><p id="err"></p></div>
 <div id="panel" class="hidden"><div class="tabs"><button onclick="show('orders')">Заказы</button><button onclick="show('priceRequests')">Запросы прайс-листа</button><button onclick="show('partners')">Партнёры</button><button onclick="show('suppliers')">Поставщики</button><button onclick="show('products')">Товары</button><button onclick="logout()">Выйти</button></div>
@@ -87,10 +87,31 @@ async function loadPriceRequests(){
     let requests;
     try{requests=await r.json()}catch(e){requests=null}
     if(!r.ok){priceRequestsList.textContent=(requests&&requests.error)||"Не удалось загрузить запросы.";return}
-    priceRequestsList.innerHTML=requests.length?requests.map(item=>`<div class="order"><b>Запрос #${item.id}</b> · ${escapeHtml(formatDate(item.created_at))}<br><b>${escapeHtml(item.name)}</b> · ${escapeHtml(item.phone)} · ${escapeHtml(item.email)}<br>Компания / ИП: ${escapeHtml(item.company)||"—"}<br>Комментарий: ${escapeHtml(item.comment)||"—"}<br>Статус: <b>${escapeHtml(item.status)}</b></div>`).join(""):"Запросов пока нет.";
+    priceRequestsList.innerHTML=requests.length?requests.map(item=>`<div class="order" data-price-request-id="${item.id}"><b>Запрос #${item.id}</b> · ${escapeHtml(formatDate(item.created_at))}<br><b>${escapeHtml(item.name)}</b> · ${escapeHtml(item.phone)} · ${escapeHtml(item.email)}<br>Компания / ИП: ${escapeHtml(item.company)||"—"}<br>Комментарий: ${escapeHtml(item.comment)||"—"}<br>Статус: <b data-role="request-status">${escapeHtml(item.status)}</b><div data-role="sent-details">${item.sent_at?`Отправлен: ${escapeHtml(formatDate(item.sent_at))}<br>Файл: ${escapeHtml(item.sent_file_name)||"—"}`:"Прайс ещё не отправлялся."}</div><div class="price-request-actions"><input data-role="price-file" type="file" accept=".xlsx,.xls,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/pdf"><button class="btn" onclick="sendPriceList(${item.id},this)">Отправить прайс</button></div><p class="send-result" data-role="send-result" aria-live="polite"></p></div>`).join(""):"Запросов пока нет.";
   }catch(e){
     priceRequestsList.textContent="Не удалось связаться с сервером. Проверьте подключение.";
   }
+}
+async function sendPriceList(id,button){
+  const card=button.closest('[data-price-request-id]');
+  const fileInput=card.querySelector('[data-role="price-file"]');
+  const result=card.querySelector('[data-role="send-result"]');
+  const file=fileInput.files[0];
+  if(!file){result.textContent="Выберите XLSX, XLS или PDF-файл.";return}
+  const form=new FormData();form.append("file",file);
+  button.disabled=true;fileInput.disabled=true;result.textContent="Отправка письма…";
+  try{
+    const r=await api(`/api/admin/price-requests/${id}/send`,{method:"POST",body:form});
+    if(r.status===401)return logout();
+    let data={};
+    try{data=await r.json()}catch(e){}
+    if(!r.ok)throw new Error(data.error||"Не удалось отправить прайс-лист");
+    card.querySelector('[data-role="request-status"]').textContent=data.status;
+    card.querySelector('[data-role="sent-details"]').innerHTML=`Отправлен: ${escapeHtml(formatDate(data.sent_at))}<br>Файл: ${escapeHtml(data.sent_file_name)}`;
+    fileInput.value="";
+    result.textContent="Прайс-лист успешно отправлен клиенту.";
+  }catch(e){result.textContent=e.message||"Не удалось отправить прайс-лист"}
+  finally{button.disabled=false;fileInput.disabled=false}
 }
 async function loadPartners(){
   try{

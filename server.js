@@ -9,6 +9,7 @@ import path from "path";
 import crypto from "crypto";
 import multer from "multer";
 import ExcelJS from "exceljs";
+import nodemailer from "nodemailer";
 import { fileURLToPath } from "url";
 
 dotenv.config();
@@ -95,8 +96,41 @@ const xlsxUpload = multer({
     callback(extension === ".xlsx" ? null : new Error("Разрешены только XLSX-файлы"), extension === ".xlsx");
   }
 });
+const PRICE_FILE_MAX_SIZE = 15 * 1024 * 1024;
+const priceFileTypes = new Map([
+  [".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  [".xls", "application/vnd.ms-excel"],
+  [".pdf", "application/pdf"]
+]);
+const priceFileUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: PRICE_FILE_MAX_SIZE, files: 1 },
+  fileFilter: (req, file, callback) => {
+    const extension = path.extname(file.originalname).toLowerCase();
+    const expectedMime = priceFileTypes.get(extension);
+    const valid = expectedMime && file.mimetype.toLowerCase() === expectedMime;
+    callback(valid ? null : new Error("Разрешены только XLSX, XLS или PDF-файлы"), Boolean(valid));
+  }
+});
 const importPreviews = new Map();
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
+
+function smtpTransport() {
+  const required = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"];
+  if (required.some(name => !process.env[name])) return null;
+  const port = Number(process.env.SMTP_PORT);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
+  const secureValue = process.env.SMTP_SECURE.toLowerCase();
+  if (!["true", "false"].includes(secureValue)) return null;
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port,
+    secure: secureValue === "true",
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    disableFileAccess: true,
+    disableUrlAccess: true
+  });
+}
 
 async function initDb() {
   await pool.query(`
@@ -231,6 +265,13 @@ async function initDb() {
       status TEXT NOT NULL DEFAULT 'new',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE price_requests
+      ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS sent_by_admin_id INTEGER,
+      ADD COLUMN IF NOT EXISTS sent_file_name TEXT;
   `);
 
   await pool.query(`
@@ -645,13 +686,98 @@ app.get("/api/admin/orders", auth, async (req, res) => {
 app.get("/api/admin/price-requests", auth, async (req, res) => {
   try {
     const requests = await pool.query(
-      `SELECT id,name,phone,email,company,comment,status,created_at
+      `SELECT id,name,phone,email,company,comment,status,created_at,
+              sent_at,sent_by_admin_id,sent_file_name
        FROM price_requests ORDER BY created_at DESC, id DESC`
     );
     res.json(requests.rows);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Ошибка базы данных" });
+  }
+});
+
+const receivePriceFile = (req, res, next) => priceFileUpload.single("file")(req, res, error => {
+  if (!error) return next();
+  const message = error.code === "LIMIT_FILE_SIZE"
+    ? "Файл превышает максимальный размер 15 МБ"
+    : error.message || "Не удалось загрузить файл";
+  return res.status(400).json({ error: message });
+});
+
+function hasValidPriceFileSignature(file) {
+  const extension = path.extname(file.originalname).toLowerCase();
+  if (extension === ".pdf") return file.buffer.subarray(0, 5).toString() === "%PDF-";
+  if (extension === ".xlsx") return file.buffer[0] === 0x50 && file.buffer[1] === 0x4b;
+  if (extension === ".xls") {
+    const signature = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+    return signature.every((byte, index) => file.buffer[index] === byte);
+  }
+  return false;
+}
+
+app.post("/api/admin/price-requests/:id/send", auth, receivePriceFile, async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isInteger(requestId) || requestId <= 0) {
+    return res.status(400).json({ error: "Некорректный запрос прайс-листа" });
+  }
+  if (!req.file) return res.status(400).json({ error: "Выберите файл прайс-листа" });
+  if (!hasValidPriceFileSignature(req.file)) {
+    return res.status(400).json({ error: "Содержимое файла не соответствует его формату" });
+  }
+  const transporter = smtpTransport();
+  if (!transporter) {
+    return res.status(503).json({
+      error: "Отправка почты не настроена. Проверьте SMTP-параметры сервера."
+    });
+  }
+  try {
+    const requestResult = await pool.query(
+      "SELECT id,name,email FROM price_requests WHERE id=$1",
+      [requestId]
+    );
+    const priceRequest = requestResult.rows[0];
+    if (!priceRequest) return res.status(404).json({ error: "Запрос прайс-листа не найден" });
+    const fileName = path.basename(req.file.originalname)
+      .replace(/[\u0000-\u001f\u007f]/g, "_")
+      .slice(0, 255) || `price${path.extname(req.file.originalname).toLowerCase()}`;
+    const text = `Здравствуйте, ${priceRequest.name}!
+
+Спасибо за интерес к SCENTÉVIA.
+
+Во вложении направляем актуальный прайс-лист.
+По вопросам наличия, условий сотрудничества и заказа вы можете связаться с нами:
+
+Telegram: @scentevia
+Сайт: scentevia.ru
+
+С уважением,
+SCENTÉVIA`;
+    try {
+      await transporter.sendMail({
+        from: process.env.SMTP_FROM,
+        to: priceRequest.email,
+        subject: "SCENTÉVIA — актуальный прайс-лист",
+        text,
+        attachments: [{ filename: fileName, content: req.file.buffer, contentType: req.file.mimetype }]
+      });
+    } catch (error) {
+      console.error("Price list email delivery failed:", error.message);
+      return res.status(502).json({
+        error: "Не удалось отправить письмо. Проверьте SMTP и повторите попытку."
+      });
+    }
+    const updated = await pool.query(
+      `UPDATE price_requests
+       SET status='sent',sent_at=NOW(),sent_by_admin_id=$1,sent_file_name=$2
+       WHERE id=$3
+       RETURNING id,status,sent_at,sent_by_admin_id,sent_file_name`,
+      [req.admin.id, fileName, requestId]
+    );
+    return res.json(updated.rows[0]);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Не удалось обработать отправку прайс-листа" });
   }
 });
 
